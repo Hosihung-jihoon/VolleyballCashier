@@ -1,0 +1,31 @@
+# AI Agent Configuration - Volleyball Cashier App
+
+## 1. File Access & Ignore Rules
+To save context window and quota, STRICTLY IGNORE the following files/directories:
+- `node_modules/`
+- `.expo/`
+- `dist/`
+- `web-build/`
+- `ios/`
+- `android/`
+- `package-lock.json`
+- `yarn.lock`
+- `babel.config.js`
+- `metro.config.js`
+- `tsconfig.json`
+- `app.json` (only read if asked, do not modify unless instructed)
+
+## 2. Focus & Core Logic
+- Focus ONLY on core application logic, UI components (React Native), and Firebase Realtime Database integration.
+- Do not refactor existing working code unless explicitly requested.
+- Keep functions modular and small.
+
+## 3. Security Rules
+- NEVER hardcode Firebase API keys, database URLs, or any sensitive credentials directly in the source code.
+- Always use environment variables (e.g., `process.env.EXPO_PUBLIC_FIREBASE_API_KEY`) or a `firebaseConfig.js` file that is added to `.gitignore`.
+- Do not expose security rules or private keys in the chat.
+
+## 4. Workflow & Memory Protocol
+- **BEFORE starting any coding task or generating code:** READ the `system.md` file to understand the current project state, architecture, and business logic.
+- **AFTER completing a coding task or making significant changes:** UPDATE the `system.md` file with the new progress, added files, and any changes to the logic or architecture.
+- Always follow the betting logic and rounding rules defined in `system.md`.
