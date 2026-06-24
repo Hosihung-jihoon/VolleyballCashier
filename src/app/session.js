@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { addPlayerToSession, finishSet, startNewSet, subscribeToSession, togglePlayerSettled, undoSet, updateSetTeams } from '../lib/sessionApi';
 
 export default function SessionScreen() {
@@ -11,6 +11,8 @@ export default function SessionScreen() {
   const [betAmount, setBetAmount] = useState('5000'); // State tiền cược
   const [subTarget, setSubTarget] = useState(null);
   const [historyModalData, setHistoryModalData] = useState(null); // { setId, setData }
+  const [teamPickerPlayerId, setTeamPickerPlayerId] = useState(null);
+
 
   useEffect(() => {
     const unsub = subscribeToSession(pin, (data) => {
@@ -51,6 +53,7 @@ export default function SessionScreen() {
       ? { teamA: { slots }, teamB: latestSet?.teamB || { slots: {} } } 
       : { teamA: latestSet?.teamA || { slots: {} }, teamB: { slots } };
     updateSetTeams(pin, latestSetId, updateObj.teamA, updateObj.teamB);
+    setTeamPickerPlayerId(null);
   };
 
   const handleRemoveFromTeam = (pid, team) => {
@@ -94,6 +97,9 @@ export default function SessionScreen() {
   const onWaitingPlayerPress = (pid) => {
     if (!isHost) return;
     if (subTarget) handleExecuteSub(pid);
+    else if (Platform.OS === 'web') {
+      setTeamPickerPlayerId(teamPickerPlayerId === pid ? null : pid);
+    }
     else Alert.alert("Chọn đội", `Thêm ${players[pid].name} vào:`, [
       { text: "Team A", onPress: () => handleAddToTeam(pid, 'teamA') },
       { text: "Team B", onPress: () => handleAddToTeam(pid, 'teamB') },
@@ -153,12 +159,26 @@ export default function SessionScreen() {
           )}
           <View style={styles.chipsContainer}>
             {getWaitingPlayers().map(pid => (
-              <TouchableOpacity key={pid} style={[styles.chip, subTarget && { backgroundColor: '#ffe0b2', borderColor: '#ff9800' }]} onPress={() => onWaitingPlayerPress(pid)}>
+              <TouchableOpacity key={pid} style={[styles.chip, teamPickerPlayerId === pid && styles.selectedChip, subTarget && { backgroundColor: '#ffe0b2', borderColor: '#ff9800' }]} onPress={() => onWaitingPlayerPress(pid)}>
                 <Text>{players[pid]?.name}</Text>
               </TouchableOpacity>
             ))}
             {getWaitingPlayers().length === 0 && <Text style={{color:'#999'}}>Tất cả đã lên sân!</Text>}
           </View>
+          {Platform.OS === 'web' && teamPickerPlayerId && players[teamPickerPlayerId] && (
+            <View style={styles.teamPicker}>
+              <Text style={styles.teamPickerTitle}>Thêm {players[teamPickerPlayerId]?.name} vào:</Text>
+              <TouchableOpacity style={[styles.teamPickerBtn, { backgroundColor: '#1a73e8' }]} onPress={() => handleAddToTeam(teamPickerPlayerId, 'teamA')}>
+                <Text style={styles.teamPickerBtnText}>Team A</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.teamPickerBtn, { backgroundColor: '#ea4335' }]} onPress={() => handleAddToTeam(teamPickerPlayerId, 'teamB')}>
+                <Text style={styles.teamPickerBtnText}>Team B</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.teamPickerCancel} onPress={() => setTeamPickerPlayerId(null)}>
+                <Text style={styles.teamPickerCancelText}>Hủy</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Lịch sử các set */}
@@ -348,6 +368,13 @@ const styles = StyleSheet.create({
   addBtnText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap' },
   chip: { backgroundColor: '#fff', padding: 8, borderRadius: 15, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#ddd' },
+  selectedChip: { backgroundColor: '#e8f0fe', borderColor: '#1a73e8' },
+  teamPicker: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 4, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#d8e0ea' },
+  teamPickerTitle: { fontWeight: 'bold', marginRight: 4 },
+  teamPickerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  teamPickerBtnText: { color: '#fff', fontWeight: 'bold' },
+  teamPickerCancel: { paddingHorizontal: 12, paddingVertical: 8 },
+  teamPickerCancelText: { color: '#666', fontWeight: 'bold' },
   historyContainer: { marginBottom: 20, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#eee' },
   historyItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
   historyText: { fontSize: 14, fontWeight: 'bold' }, historySub: { fontSize: 12, color: '#666' },
