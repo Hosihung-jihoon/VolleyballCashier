@@ -45,11 +45,36 @@ export default function HomeScreen() {
   useEffect(() => {
     const checkLastSession = async () => {
       try {
+        const savedName = await AsyncStorage.getItem('saved_user_name');
+        if (savedName) {
+          setName(savedName);
+        }
         const pinVal = await AsyncStorage.getItem('last_session_pin');
         const roleVal = await AsyncStorage.getItem('last_session_role');
         if (pinVal && roleVal) {
           setLastPin(pinVal);
           setLastRole(roleVal);
+        }
+
+        // Dọn dẹp phòng offline quá 24h
+        const keys = await AsyncStorage.getAllKeys();
+        const localSessionKeys = keys.filter(k => k.startsWith('local_session_'));
+        for (const key of localSessionKeys) {
+          const dataStr = await AsyncStorage.getItem(key);
+          if (dataStr) {
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed && parsed.createdAt) {
+                const ageMs = Date.now() - parsed.createdAt;
+                if (ageMs > 24 * 60 * 60 * 1000) {
+                  await AsyncStorage.removeItem(key);
+                  console.log(`Đã xóa phòng offline hết hạn: ${key}`);
+                }
+              }
+            } catch (e) {
+              await AsyncStorage.removeItem(key);
+            }
+          }
         }
       } catch (e) {
         console.log(e);
@@ -72,6 +97,7 @@ export default function HomeScreen() {
     }
     setLoading(true);
     try {
+      await AsyncStorage.setItem('saved_user_name', name.trim());
       const { pin: newPin } = await createSession(name.trim(), false);
       router.push({ pathname: '/session', params: { pin: newPin, role: 'host' } });
     } catch (e) {
@@ -88,6 +114,7 @@ export default function HomeScreen() {
     }
     setLoading(true);
     try {
+      await AsyncStorage.setItem('saved_user_name', name.trim());
       const { pin: newPin } = await createSession(name.trim(), true);
       router.push({ pathname: '/session', params: { pin: newPin, role: 'host' } });
     } catch (e) {
@@ -104,6 +131,7 @@ export default function HomeScreen() {
     }
     setLoading(true);
     try {
+      await AsyncStorage.setItem('saved_user_name', name.trim());
       await joinSession(pin.trim(), name.trim());
       router.push({ pathname: '/session', params: { pin: pin.trim(), role: 'member' } });
     } catch (e) {
