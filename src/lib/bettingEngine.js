@@ -1,7 +1,7 @@
 // lib/bettingEngine.js
 export const calculateSettlement = (teamA, teamB, winner, betAmount) => {
-  const slotsA = Object.values(teamA.slots || {});
-  const slotsB = Object.values(teamB.slots || {});
+  const slotsA = Object.values(teamA?.slots || {});
+  const slotsB = Object.values(teamB?.slots || {});
 
   // Tổng tiền = Số người đội ít hơn * Tiền cược
   const minSlots = Math.min(slotsA.length, slotsB.length);

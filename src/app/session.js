@@ -1,7 +1,33 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { addPlayerToSession, finishSet, startNewSet, subscribeToSession, togglePlayerSettled, undoSet, updateSetTeams } from '../lib/sessionApi';
+import { addPlayerToSession, finishSet, startNewSet, subscribeToSession, togglePlayerSettled, undoSet, updateSetTeams, updateSetBetAmount } from '../lib/sessionApi';
+
+const showAlert = (title, message, buttons = []) => {
+  if (Platform.OS === 'web') {
+    if (buttons && buttons.length > 0) {
+      const confirmButton = buttons.find(b => b.text === 'Đúng' || b.text === 'OK') || buttons[buttons.length - 1];
+      const hasCancel = buttons.some(b => b.text === 'Hủy' || b.text === 'Cancel');
+      if (hasCancel) {
+        const result = window.confirm(`${title}\n\n${message}`);
+        if (result) {
+          if (confirmButton && confirmButton.onPress) confirmButton.onPress();
+        } else {
+          const cancelButton = buttons.find(b => b.text === 'Hủy' || b.text === 'Cancel');
+          if (cancelButton && cancelButton.onPress) cancelButton.onPress();
+        }
+      } else {
+        window.alert(`${title}\n\n${message}`);
+        if (confirmButton && confirmButton.onPress) confirmButton.onPress();
+      }
+    } else {
+      window.alert(`${title}\n\n${message}`);
+    }
+  } else {
+    Alert.alert(title, message, buttons);
+  }
+};
 
 export default function SessionScreen() {
   const { pin, role } = useLocalSearchParams();
@@ -13,14 +39,33 @@ export default function SessionScreen() {
   const [historyModalData, setHistoryModalData] = useState(null); // { setId, setData }
   const [teamPickerPlayerId, setTeamPickerPlayerId] = useState(null);
 
+  useEffect(() => {
+    if (pin && role) {
+      AsyncStorage.setItem('last_session_pin', pin);
+      AsyncStorage.setItem('last_session_role', role);
+    }
+  }, [pin, role]);
+
 
   useEffect(() => {
     const unsub = subscribeToSession(pin, (data) => {
       setSession(data);
       if (data?.sets) {
         const sortedSets = Object.entries(data.sets).sort((a, b) => b[0].localeCompare(a[0]));
-        setLatestSetId(sortedSets[0][0]);
-      } else { setLatestSetId(null); }
+        const latestId = sortedSets[0][0];
+        setLatestSetId(latestId);
+        
+        // Đồng bộ số tiền cược từ database (tránh ghi đè khi Host đang nhập)
+        const lSet = data.sets[latestId];
+        if (lSet && lSet.betAmount !== undefined) {
+          setBetAmount(prev => {
+            if (prev === lSet.betAmount.toString()) return prev;
+            return lSet.betAmount.toString();
+          });
+        }
+      } else { 
+        setLatestSetId(null); 
+      }
     });
     return () => unsub();
   }, [pin]);
@@ -100,7 +145,7 @@ export default function SessionScreen() {
     else if (Platform.OS === 'web') {
       setTeamPickerPlayerId(teamPickerPlayerId === pid ? null : pid);
     }
-    else Alert.alert("Chọn đội", `Thêm ${players[pid].name} vào:`, [
+    else showAlert("Chọn đội", `Thêm ${players[pid].name} vào:`, [
       { text: "Team A", onPress: () => handleAddToTeam(pid, 'teamA') },
       { text: "Team B", onPress: () => handleAddToTeam(pid, 'teamB') },
       { text: "Hủy" }
@@ -110,9 +155,9 @@ export default function SessionScreen() {
   const handleFinishSet = (winner) => {
     if (!latestSet) return;
     if (Object.keys(latestSet?.teamA?.slots || {}).length === 0 || Object.keys(latestSet?.teamB?.slots || {}).length === 0) {
-      Alert.alert("Lỗi", "Vui lòng chia đủ người!"); return;
+      showAlert("Lỗi", "Vui lòng chia đủ người!"); return;
     }
-    Alert.alert("Xác nhận", `${winner === 'teamA' ? 'Team A' : 'Team B'} thắng?`, [
+    showAlert("Xác nhận", `${winner === 'teamA' ? 'Team A' : 'Team B'} thắng?`, [
       { text: "Hủy" }, { text: "Đúng", onPress: () => finishSet(pin, latestSetId, winner) }
     ]);
   };
@@ -124,11 +169,28 @@ export default function SessionScreen() {
     await startNewSet(pin, amount, prevTeams);
   };
 
+  // Xử lý thay đổi tiền cược set đang đấu
+  const handleBetAmountChange = async (val) => {
+    setBetAmount(val);
+    const amount = parseInt(val) || 0;
+    if (latestSet && latestSet.status === 'playing' && isHost) {
+      await updateSetBetAmount(pin, latestSetId, amount);
+    }
+  };
+
+  const handleGoBack = () => {
+    router.replace('/');
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.pinText}>PIN: {pin}</Text>
-        <Text style={styles.roleText}>{isHost ? '👑 Host' : '👤 Member'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>⬅</Text>
+          </TouchableOpacity>
+          <Text style={styles.pinText}>PIN: {pin} ({isHost ? 'Host' : 'Mem'})</Text>
+        </View>
         <Text style={styles.fundText}>Quỹ: {session.meta?.fund || 0}đ</Text>
       </View>
 
@@ -140,6 +202,17 @@ export default function SessionScreen() {
       )}
 
       <ScrollView style={styles.body} contentContainerStyle={{ paddingBottom: isHost ? 100 : 20 }}>
+        {latestSet && (
+          <View style={styles.activeSetHeader}>
+            <Text style={styles.activeSetTitle}>
+              Set {latestSetId.replace('set_', '')}: {latestSet.status === 'playing' ? 'Đang đấu' : 'Đã xong'}
+            </Text>
+            <Text style={styles.activeSetBet}>
+              Cược: {parseInt(latestSet.betAmount || 5000).toLocaleString('vi-VN')}đ
+            </Text>
+          </View>
+        )}
+
         {latestSet ? (
           <View style={styles.teamsContainer}>
             <TeamColumn title="Team A" color="#e8f0fe" slots={latestSet?.teamA?.slots || {}} players={players} isHost={isHost} isPlaying={latestSet?.status === 'playing'} subTarget={subTarget} onSelectSlot={(id) => handleSelectSlotForSub('teamA', id)} onRemovePlayer={(pid) => handleRemoveFromTeam(pid, 'teamA')} />
@@ -296,13 +369,15 @@ export default function SessionScreen() {
 
       {isHost && (
         <View style={styles.footer}>
-          {/* Input tiền cược chỉ hiện khi chưa có set hoặc set đã xong */}
-          {(!latestSet || latestSet.status === 'completed') && (
-            <View style={styles.betInputContainer}>
-              <TextInput style={styles.betInput} keyboardType="numeric" value={betAmount} onChangeText={setBetAmount} />
-              <Text style={{color:'#666'}}>đ/set</Text>
-            </View>
-          )}
+          <View style={styles.betInputContainer}>
+            <TextInput 
+              style={styles.betInput} 
+              keyboardType="numeric" 
+              value={betAmount} 
+              onChangeText={handleBetAmountChange} 
+            />
+            <Text style={{color:'#666'}}>đ</Text>
+          </View>
           {!latestSet ? (
             <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#1a73e8'}]} onPress={handleStartSet}>
               <Text style={styles.btnText}>Bắt đầu</Text>
@@ -314,7 +389,7 @@ export default function SessionScreen() {
             </>
           ) : (
             <>
-              <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#1a73e8'}]} onPress={handleStartSet}><Text style={styles.btnText}>Set tiếp theo</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#1a73e8'}]} onPress={handleStartSet}><Text style={styles.btnText}>Set tiếp</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#f9ab00'}]} onPress={() => undoSet(pin, latestSetId)}><Text style={styles.btnText}>Hoàn tác</Text></TouchableOpacity>
             </>
           )}
@@ -402,4 +477,9 @@ const styles = StyleSheet.create({
   subTag: { fontSize: 10, color: '#ff9800', textAlign: 'center', marginTop: 4, fontWeight: 'bold' },
   modalCloseBtn: { marginTop: 20, backgroundColor: '#1a73e8', padding: 12, borderRadius: 10, alignItems: 'center' },
   modalCloseText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  activeSetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 12, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#e0e0e0' },
+  activeSetTitle: { fontWeight: 'bold', color: '#333', fontSize: 15 },
+  activeSetBet: { fontWeight: 'bold', color: '#1a73e8', fontSize: 15 },
+  backBtn: { marginRight: 8, paddingVertical: 2, paddingHorizontal: 4 },
+  backBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });
