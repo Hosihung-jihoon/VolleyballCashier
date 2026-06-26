@@ -7,6 +7,7 @@ import {
     Text, TextInput, TouchableOpacity,
     View
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { createSession, joinSession } from '../lib/sessionApi';
 
 const showAlert = (title, message, buttons = []) => {
@@ -146,7 +147,10 @@ export default function HomeScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>🏐 Volleyball Cashier</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 5 }}>
+          <Ionicons name="trophy" size={32} color="#1a73e8" style={{ marginRight: 8 }} />
+          <Text style={styles.title}>Volleyball Cashier</Text>
+        </View>
         <Text style={styles.subtitle}>Quản lý tiền cược bóng chuyền</Text>
 
         <TextInput
@@ -167,11 +171,12 @@ export default function HomeScreen() {
 
         {lastPin && (
           <TouchableOpacity
-            style={[styles.button, styles.resumeButton]}
+            style={[styles.button, styles.resumeButton, { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]}
             onPress={handleResume}
             disabled={loading}
           >
-            <Text style={styles.buttonText}>🔄 Tiếp tục phòng đang chơi ({lastPin})</Text>
+            <Ionicons name="refresh-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.buttonText}>Tiếp tục phòng đang chơi ({lastPin})</Text>
           </TouchableOpacity>
         )}
 
@@ -200,10 +205,11 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.helpButton}
+          style={[styles.helpButton, { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]}
           onPress={() => setShowHelpModal(true)}
         >
-          <Text style={styles.helpButtonText}>ℹ️ Hướng dẫn & Tính năng</Text>
+          <Ionicons name="information-circle-outline" size={18} color="#1a73e8" style={{ marginRight: 5 }} />
+          <Text style={styles.helpButtonText}>Hướng dẫn & Tính năng</Text>
         </TouchableOpacity>
       </View>
 
@@ -216,40 +222,109 @@ export default function HomeScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>🏐 Volleyball Cashier</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 5 }}>
+              <Ionicons name="trophy" size={28} color="#1a73e8" style={{ marginRight: 8 }} />
+              <Text style={styles.modalTitle}>Volleyball Cashier</Text>
+            </View>
             <Text style={styles.modalSubtitle}>Ứng dụng quản lý tiền cược bóng chuyền tiện lợi</Text>
             
             <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-              <Text style={styles.sectionTitle}>🎯 Mục đích của app</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 15, marginBottom: 8 }}>
+                <Ionicons name="locate" size={20} color="#1a73e8" style={{ marginRight: 6 }} />
+                <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0 }]}>Mục đích của app</Text>
+              </View>
               <Text style={styles.descText}>
                 Volleyball Cashier giúp nhóm chơi bóng chuyền (chơi cược/độ) dễ dàng phân chia đội hình, quản lý người chơi dự bị, tự động ghi nhận kết quả và tính toán số tiền thắng/thua của mỗi người sau mỗi set đấu một cách rõ ràng, minh bạch.
               </Text>
 
-              <Text style={styles.sectionTitle}>🚀 Các tính năng chính</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 15, marginBottom: 8 }}>
+                <Ionicons name="flash" size={20} color="#1a73e8" style={{ marginRight: 6 }} />
+                <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0 }]}>Các tính năng chính</Text>
+              </View>
               
               <View style={styles.featureItem}>
-                <Text style={styles.featureTitle}>📶 Tạo phòng Online</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="wifi" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Tạo phòng Online</Text>
+                </View>
                 <Text style={styles.featureDesc}>Host tạo phòng lấy mã PIN, các thành viên khác nhập PIN để tham gia tự chọn đội hoặc xem kết quả thời gian thực trên máy cá nhân.</Text>
               </View>
 
               <View style={styles.featureItem}>
-                <Text style={styles.featureTitle}>📴 Tạo phòng Offline (1 máy)</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="phone-portrait-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Tạo phòng Offline (1 máy)</Text>
+                </View>
                 <Text style={styles.featureDesc}>Hoạt động hoàn toàn không cần internet. Một máy của Host tự quản lý danh sách người chơi, chia đội và ghi nhận toàn bộ kết quả.</Text>
               </View>
 
               <View style={styles.featureItem}>
-                <Text style={styles.featureTitle}>👥 Chia đội & Thay người</Text>
-                <Text style={styles.featureDesc}>Thêm người chơi vào Team A và Team B. Hỗ trợ cơ chế thay người linh hoạt trong lúc set đấu đang diễn ra.</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="people" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Chia đội & Thay người</Text>
+                </View>
+                <Text style={styles.featureDesc}>Thêm người chơi vào các Đội. Hỗ trợ cơ chế thay người linh hoạt trong lúc set đấu đang diễn ra.</Text>
               </View>
 
               <View style={styles.featureItem}>
-                <Text style={styles.featureTitle}>💰 Tự động tính toán tiền cược</Text>
-                <Text style={styles.featureDesc}>Số tiền thắng/thua được tính tự động dựa trên mức cược và số người chơi (đội thắng nhận tiền từ đội thua; nếu lệch người, phần tiền chênh lệch sẽ được tự động gom vào Quỹ chung của sân).</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="cash" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Tự động tính toán tiền cược</Text>
+                </View>
+                <Text style={styles.featureDesc}>Số tiền thắng/thua được tính tự động dựa trên mức cược và số người chơi riêng biệt cho từng thành viên.</Text>
               </View>
 
               <View style={styles.featureItem}>
-                <Text style={styles.featureTitle}>📊 Lịch sử & Thanh toán</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="receipt" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Lịch sử & Thanh toán</Text>
+                </View>
                 <Text style={styles.featureDesc}>Xem lại lịch sử chi tiết từng set đấu, hỗ trợ tính năng Hoàn tác (Undo) và tích chọn thanh toán cuối buổi cho từng thành viên.</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 10 }}>
+                <Ionicons name="calculator" size={20} color="#1a73e8" style={{ marginRight: 6 }} />
+                <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0 }]}>Quy định & Luật Cược (Betting)</Text>
+              </View>
+
+              <View style={styles.featureItem}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="cash-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Mức cược chung của Set</Text>
+                </View>
+                <Text style={styles.featureDesc}>Mức cược mặc định của set đấu (ví dụ 5k, 10k, 20k) áp dụng cho tất cả thành viên tham gia. Tiền thắng/thua được gộp chung theo đội và chia đều cho từng người thi đấu của đội đó.</Text>
+              </View>
+
+              <View style={styles.featureItem}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="person-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Mức cược riêng (Cược cá nhân)</Text>
+                </View>
+                <Text style={styles.featureDesc}>Nếu một người muốn cược nhiều hơn hoặc ít hơn mức cược chung, họ có thể đặt mức cược riêng. Khi kết thúc set đấu, kết quả thắng/thua của họ sẽ dựa trên mức cược riêng này thay vì mức cược chung của set.</Text>
+              </View>
+
+              <View style={styles.featureItem}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="swap-horizontal-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Cược đối đầu trực tiếp 1-on-1</Text>
+                </View>
+                <Text style={styles.featureDesc}>Cho phép người chơi đặt cược riêng nhắm thẳng vào một đối thủ cụ thể ở đội kia. Khi kết thúc set đấu, người thắng sẽ nhận tiền trực tiếp từ người thua của cặp đấu này, độc lập hoàn toàn với việc chia quỹ đội chung.</Text>
+              </View>
+
+              <View style={styles.featureItem}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="people-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Chia sẻ tiền cược khi Thay người</Text>
+                </View>
+                <Text style={styles.featureDesc}>Nếu một slot trong đội có thay người giữa trận (bao gồm cả Starter khởi động và Sub dự bị vào thay), số tiền thắng/thua của slot đó sẽ được chia đôi (50-50) giữa hai người chơi để đảm bảo tính công bằng.</Text>
+              </View>
+
+              <View style={styles.featureItem}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Ionicons name="git-commit-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
+                  <Text style={styles.featureTitle}>Quy tắc làm tròn số tiền</Text>
+                </View>
+                <Text style={styles.featureDesc}>Để dễ dàng trao đổi tiền lẻ ngoài đời, mọi số tiền lẻ phát sinh từ việc chia đều hoặc chia đôi thay người sẽ tự động được làm tròn đến bội số gần nhất của 1.000đ. Hệ thống tự động cân đối quỹ để đảm bảo tổng số tiền thay đổi của tất cả người chơi luôn bằng 0đ.</Text>
               </View>
             </ScrollView>
 

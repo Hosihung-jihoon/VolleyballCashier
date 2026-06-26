@@ -59,7 +59,8 @@ export const createSession = async (hostName, isOffline = false) => {
       hostId: deviceId,
       hostName: hostName,
       createdAt: now,
-      isOffline: isOffline
+      isOffline: isOffline,
+      teams: ['teamA', 'teamB', 'teamC']
     },
     players: {},
     sets: {},
@@ -174,56 +175,83 @@ export const startNewSet = async (pin, betAmount, previousTeams = null) => {
     const setCount = session.sets ? Object.keys(session.sets).length : 0;
     const setId = `set_${setCount + 1}`;
 
+    const teamsList = session.meta?.teams || ['teamA', 'teamB', 'teamC'];
+    const teamsData = {};
+    teamsList.forEach(t => {
+      const letter = t.replace('team', '');
+      teamsData[t] = {
+        name: `Team ${letter}`,
+        slots: previousTeams?.teams?.[t]?.slots || previousTeams?.[t]?.slots || {}
+      };
+    });
+
     if (!session.sets) session.sets = {};
     session.sets[setId] = {
       status: 'playing',
       winner: null,
       betAmount: betAmount,
-      matchup: previousTeams?.matchup || 'A_B',
+      matchup: previousTeams?.matchup || 'teamA_teamB',
       playerBets: previousTeams?.playerBets || {},
-      teamA: previousTeams?.teamA || { slots: {} },
-      teamB: previousTeams?.teamB || { slots: {} },
-      teamC: previousTeams?.teamC || { slots: {} },
+      teams: teamsData,
+      // legacy fields
+      teamA: teamsData.teamA || { slots: {} },
+      teamB: teamsData.teamB || { slots: {} },
+      teamC: teamsData.teamC || { slots: {} },
     };
     await saveSessionData(pin, session);
     return setId;
   }
 
-  const setsRef = ref(db, `sessions/${pin}/sets`);
-  const snapshot = await get(setsRef);
-  const setCount = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+  const sessionRef = ref(db, `sessions/${pin}`);
+  const sessionSnap = await get(sessionRef);
+  const session = sessionSnap.val() || {};
+  const setCount = session.sets ? Object.keys(session.sets).length : 0;
   const setId = `set_${setCount + 1}`;
+
+  const teamsList = session.meta?.teams || ['teamA', 'teamB', 'teamC'];
+  const teamsData = {};
+  teamsList.forEach(t => {
+    const letter = t.replace('team', '');
+    teamsData[t] = {
+      name: `Team ${letter}`,
+      slots: previousTeams?.teams?.[t]?.slots || previousTeams?.[t]?.slots || {}
+    };
+  });
 
   await set(ref(db, `sessions/${pin}/sets/${setId}`), {
     status: 'playing',
     winner: null,
     betAmount: betAmount,
-    matchup: previousTeams?.matchup || 'A_B',
+    matchup: previousTeams?.matchup || 'teamA_teamB',
     playerBets: previousTeams?.playerBets || {},
-    teamA: previousTeams?.teamA || { slots: {} },
-    teamB: previousTeams?.teamB || { slots: {} },
-    teamC: previousTeams?.teamC || { slots: {} },
+    teams: teamsData,
+    // legacy fields
+    teamA: teamsData.teamA || { slots: {} },
+    teamB: teamsData.teamB || { slots: {} },
+    teamC: teamsData.teamC || { slots: {} },
   });
   return setId;
 };
 
-// Cập nhật team (Thêm/Xóa người khỏi Team A/B/C)
-export const updateSetTeams = async (pin, setId, teamA, teamB, teamC) => {
+// Cập nhật team (Thêm/Xóa người khỏi Team)
+export const updateSetTeams = async (pin, setId, teams) => {
   if (pin.startsWith('L-')) {
     const session = await getSessionData(pin);
     if (!session || !session.sets || !session.sets[setId]) return;
-    session.sets[setId].teamA = teamA;
-    session.sets[setId].teamB = teamB;
-    session.sets[setId].teamC = teamC || { slots: {} };
+    session.sets[setId].teams = teams;
+    // Set legacy fields for compatibility
+    if (teams.teamA) session.sets[setId].teamA = teams.teamA;
+    if (teams.teamB) session.sets[setId].teamB = teams.teamB;
+    if (teams.teamC) session.sets[setId].teamC = teams.teamC;
     await saveSessionData(pin, session);
     return;
   }
 
-  await update(ref(db, `sessions/${pin}/sets/${setId}`), {
-    teamA: teamA,
-    teamB: teamB,
-    teamC: teamC || { slots: {} },
-  });
+  const updates = { teams: teams };
+  if (teams.teamA) updates.teamA = teams.teamA;
+  if (teams.teamB) updates.teamB = teams.teamB;
+  if (teams.teamC) updates.teamC = teams.teamC;
+  await update(ref(db, `sessions/${pin}/sets/${setId}`), updates);
 };
 
 // Cập nhật tiền cược của set đang đấu
@@ -288,7 +316,11 @@ export const finishSet = async (pin, setId, winner) => {
     if (setData.status !== 'playing') return;
 
     const { balanceChanges } = calculateSettlement(
-      setData.teamA, setData.teamB, setData.teamC, setData.matchup, winner, setData.betAmount, setData.playerBets
+      setData.teams || { teamA: setData.teamA, teamB: setData.teamB, teamC: setData.teamC },
+      setData.matchup,
+      winner,
+      setData.betAmount,
+      setData.playerBets
     );
 
     if (!session.players) session.players = {};
@@ -313,7 +345,11 @@ export const finishSet = async (pin, setId, winner) => {
   if (!setData || setData.status !== 'playing') return;
 
   const { balanceChanges } = calculateSettlement(
-    setData.teamA, setData.teamB, setData.teamC, setData.matchup, winner, setData.betAmount, setData.playerBets
+    setData.teams || { teamA: setData.teamA, teamB: setData.teamB, teamC: setData.teamC },
+    setData.matchup,
+    winner,
+    setData.betAmount,
+    setData.playerBets
   );
 
   const playersSnap = await get(ref(db, `sessions/${pin}/players`));
@@ -342,7 +378,11 @@ export const undoSet = async (pin, setId) => {
     if (setData.status !== 'completed') return;
 
     const { balanceChanges } = calculateSettlement(
-      setData.teamA, setData.teamB, setData.teamC, setData.matchup, setData.winner, setData.betAmount, setData.playerBets
+      setData.teams || { teamA: setData.teamA, teamB: setData.teamB, teamC: setData.teamC },
+      setData.matchup,
+      setData.winner,
+      setData.betAmount,
+      setData.playerBets
     );
 
     if (!session.players) session.players = {};
@@ -367,7 +407,11 @@ export const undoSet = async (pin, setId) => {
   if (!setData || setData.status !== 'completed') return;
 
   const { balanceChanges } = calculateSettlement(
-    setData.teamA, setData.teamB, setData.teamC, setData.matchup, setData.winner, setData.betAmount, setData.playerBets
+    setData.teams || { teamA: setData.teamA, teamB: setData.teamB, teamC: setData.teamC },
+    setData.matchup,
+    setData.winner,
+    setData.betAmount,
+    setData.playerBets
   );
 
   const playersSnap = await get(ref(db, `sessions/${pin}/players`));
@@ -385,6 +429,66 @@ export const undoSet = async (pin, setId) => {
   updates[`sets/${setId}/winner`] = null;
 
   await update(ref(db, `sessions/${pin}`), updates);
+};
+
+// Thêm Đội mới (Dành cho Host)
+export const addTeamToSession = async (pin, setId) => {
+  if (pin.startsWith('L-')) {
+    const session = await getSessionData(pin);
+    if (!session) return null;
+    if (!session.meta.teams) session.meta.teams = ['teamA', 'teamB', 'teamC'];
+    
+    const nextIndex = session.meta.teams.length;
+    const nextLetter = String.fromCharCode(65 + nextIndex);
+    const nextTeamKey = `team${nextLetter}`;
+    
+    session.meta.teams.push(nextTeamKey);
+    
+    if (session.sets && session.sets[setId]) {
+      const setData = session.sets[setId];
+      if (!setData.teams) {
+        setData.teams = {
+          teamA: setData.teamA || { slots: {} },
+          teamB: setData.teamB || { slots: {} },
+          teamC: setData.teamC || { slots: {} }
+        };
+      }
+      setData.teams[nextTeamKey] = { name: `Team ${nextLetter}`, slots: {} };
+      setData[nextTeamKey] = { slots: {} }; // legacy
+    }
+    
+    await saveSessionData(pin, session);
+    return nextTeamKey;
+  }
+
+  const metaRef = ref(db, `sessions/${pin}/meta`);
+  const metaSnap = await get(metaRef);
+  let currentTeams = ['teamA', 'teamB', 'teamC'];
+  if (metaSnap.exists() && metaSnap.val().teams) {
+    currentTeams = metaSnap.val().teams;
+  }
+  const nextIndex = currentTeams.length;
+  const nextLetter = String.fromCharCode(65 + nextIndex);
+  const nextTeamKey = `team${nextLetter}`;
+  const updatedTeams = [...currentTeams, nextTeamKey];
+
+  const updates = {};
+  updates[`meta/teams`] = updatedTeams;
+  
+  if (setId) {
+    const setRef = ref(db, `sessions/${pin}/sets/${setId}`);
+    const setSnap = await get(setRef);
+    if (setSnap.exists()) {
+      const setData = setSnap.val();
+      if (setData.status === 'playing') {
+        updates[`sets/${setId}/teams/${nextTeamKey}`] = { name: `Team ${nextLetter}`, slots: {} };
+        updates[`sets/${setId}/${nextTeamKey}`] = { slots: {} }; // legacy
+      }
+    }
+  }
+  
+  await update(ref(db, `sessions/${pin}`), updates);
+  return nextTeamKey;
 };
 
 // Thêm người chơi thủ công (Dành cho Host)
