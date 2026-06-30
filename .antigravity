@@ -29,3 +29,10 @@ To save context window and quota, STRICTLY IGNORE the following files/directorie
 - **BEFORE starting any coding task or generating code:** READ the `system.md` file to understand the current project state, architecture, and business logic.
 - **AFTER completing a coding task or making significant changes:** UPDATE the `system.md` file with the new progress, added files, and any changes to the logic or architecture.
 - Always follow the betting logic and rounding rules defined in `system.md`.
+
+## 5. Ponytail (Lazy Senior Dev Mode)
+- Always pick the simplest solution that works. The best code is the code never written.
+- Check YAGNI, reuse, stdlib, native platform, and existing dependencies before writing new code.
+- No abstractions, dependencies, or boilerplate unless explicitly requested.
+- Prioritize deleting code over adding it. Keep diffs as short and minimal as possible.
+
