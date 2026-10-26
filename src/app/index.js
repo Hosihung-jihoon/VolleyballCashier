@@ -1,14 +1,21 @@
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-    Alert, KeyboardAvoidingView, Modal, Platform, ScrollView,
-    StyleSheet,
-    Text, TextInput, TouchableOpacity,
-    View
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { createSession, joinSession } from '../lib/sessionApi';
+import { DuoTheme } from '../constants/theme';
+import { createSession } from '../lib/sessionApi';
 
 const showAlert = (title, message, buttons = []) => {
   if (Platform.OS === 'web') {
@@ -17,15 +24,14 @@ const showAlert = (title, message, buttons = []) => {
       const hasCancel = buttons.some(b => b.text === 'Hủy' || b.text === 'Cancel');
       if (hasCancel) {
         const result = window.confirm(`${title}\n\n${message}`);
-        if (result) {
-          if (confirmButton && confirmButton.onPress) confirmButton.onPress();
-        } else {
+        if (result && confirmButton?.onPress) confirmButton.onPress();
+        else {
           const cancelButton = buttons.find(b => b.text === 'Hủy' || b.text === 'Cancel');
-          if (cancelButton && cancelButton.onPress) cancelButton.onPress();
+          if (cancelButton?.onPress) cancelButton.onPress();
         }
       } else {
         window.alert(`${title}\n\n${message}`);
-        if (confirmButton && confirmButton.onPress) confirmButton.onPress();
+        if (confirmButton?.onPress) confirmButton.onPress();
       }
     } else {
       window.alert(`${title}\n\n${message}`);
@@ -37,24 +43,19 @@ const showAlert = (title, message, buttons = []) => {
 
 export default function HomeScreen() {
   const [name, setName] = useState('');
-  const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [lastPin, setLastPin] = useState(null);
-  const [lastRole, setLastRole] = useState(null);
 
   useEffect(() => {
     const checkLastSession = async () => {
       try {
         const savedName = await AsyncStorage.getItem('saved_user_name');
-        if (savedName) {
-          setName(savedName);
-        }
+        if (savedName) setName(savedName);
+
         const pinVal = await AsyncStorage.getItem('last_session_pin');
-        const roleVal = await AsyncStorage.getItem('last_session_role');
-        if (pinVal && roleVal) {
+        if (pinVal) {
           setLastPin(pinVal);
-          setLastRole(roleVal);
         }
 
         // Dọn dẹp phòng offline quá 24h
@@ -65,76 +66,38 @@ export default function HomeScreen() {
           if (dataStr) {
             try {
               const parsed = JSON.parse(dataStr);
-              if (parsed && parsed.createdAt) {
-                const ageMs = Date.now() - parsed.createdAt;
-                if (ageMs > 24 * 60 * 60 * 1000) {
-                  await AsyncStorage.removeItem(key);
-                  console.log(`Đã xóa phòng offline hết hạn: ${key}`);
-                }
+              const created = parsed?.meta?.createdAt || parsed?.createdAt;
+              if (created && Date.now() - created > 24 * 60 * 60 * 1000) {
+                await AsyncStorage.removeItem(key);
               }
-            } catch (e) {
+            } catch (_e) {
               await AsyncStorage.removeItem(key);
             }
           }
         }
-      } catch (e) {
-        console.log(e);
+      } catch (_e) {
+        // ignore
       }
     };
     checkLastSession();
   }, []);
 
   const handleResume = () => {
-    if (lastPin && lastRole) {
-      router.push({ pathname: '/session', params: { pin: lastPin, role: lastRole } });
+    if (lastPin) {
+      router.push({ pathname: '/session', params: { pin: lastPin, role: 'host' } });
     }
   };
 
-  // Xử lý TẠO PHÒNG ONLINE
   const handleCreate = async () => {
     if (!name.trim()) {
-      showAlert('Lỗi', 'Vui lòng nhập tên!');
+      showAlert('Lỗi', 'Vui lòng nhập tên của bạn!');
       return;
     }
     setLoading(true);
     try {
       await AsyncStorage.setItem('saved_user_name', name.trim());
-      const { pin: newPin } = await createSession(name.trim(), false);
+      const { pin: newPin } = await createSession(name.trim());
       router.push({ pathname: '/session', params: { pin: newPin, role: 'host' } });
-    } catch (e) {
-      showAlert('Lỗi', e.message);
-    }
-    setLoading(false);
-  };
-
-  // Xử lý TẠO PHÒNG OFFLINE
-  const handleCreateOffline = async () => {
-    if (!name.trim()) {
-      showAlert('Lỗi', 'Vui lòng nhập tên!');
-      return;
-    }
-    setLoading(true);
-    try {
-      await AsyncStorage.setItem('saved_user_name', name.trim());
-      const { pin: newPin } = await createSession(name.trim(), true);
-      router.push({ pathname: '/session', params: { pin: newPin, role: 'host' } });
-    } catch (e) {
-      showAlert('Lỗi', e.message);
-    }
-    setLoading(false);
-  };
-
-  // Xử lý THAM GIA PHÒNG
-  const handleJoin = async () => {
-    if (!name.trim() || !pin.trim()) {
-      showAlert('Lỗi', 'Vui lòng nhập tên và mã PIN!');
-      return;
-    }
-    setLoading(true);
-    try {
-      await AsyncStorage.setItem('saved_user_name', name.trim());
-      await joinSession(pin.trim(), name.trim());
-      router.push({ pathname: '/session', params: { pin: pin.trim(), role: 'member' } });
     } catch (e) {
       showAlert('Lỗi', e.message);
     }
@@ -144,76 +107,80 @@ export default function HomeScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.content}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 5 }}>
-          <Ionicons name="trophy" size={32} color="#1a73e8" style={{ marginRight: 8 }} />
-          <Text style={styles.title}>Volleyball Cashier</Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Brand Header */}
+        <View style={styles.brandSection}>
+          <View style={styles.logoBadge}>
+            <Ionicons name="tennisball-outline" size={42} color="#FFFFFF" />
+          </View>
+          <Text style={styles.brandTitle}>SỔ KÈO BÓNG CHUYỀN</Text>
+          <Text style={styles.brandSubtitle}>Ghi chép set đấu & chốt tiền thông minh</Text>
         </View>
-        <Text style={styles.subtitle}>Quản lý tiền cược bóng chuyền</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Nhập tên của bạn"
-          value={name}
-          onChangeText={setName}
-        />
+        {/* Input Card Container */}
+        <View style={styles.cardContainer}>
+          <Text style={styles.inputLabel}>Người quản lý / Chủ xị</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="person-outline" size={20} color={DuoTheme.colors.primary} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Nhập tên người quản lý..."
+              placeholderTextColor={DuoTheme.colors.grayMuted}
+              value={name}
+              onChangeText={setName}
+            />
+          </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Mã PIN (để tham gia)"
-          value={pin}
-          onChangeText={setPin}
-          keyboardType="numeric"
-          maxLength={4}
-        />
+          {/* Action Buttons */}
+          {lastPin && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionBtn,
+                styles.btnResume,
+                pressed && styles.btnPressed,
+              ]}
+              onPress={handleResume}
+              disabled={loading}
+            >
+              <View style={styles.btnContent}>
+                <Ionicons name="play-circle-outline" size={22} color={DuoTheme.colors.yellowDark} style={styles.btnIcon} />
+                <Text style={styles.btnTextResume}>Tiếp tục buổi chơi</Text>
+              </View>
+            </Pressable>
+          )}
 
-        {lastPin && (
-          <TouchableOpacity
-            style={[styles.button, styles.resumeButton, { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]}
-            onPress={handleResume}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionBtn,
+              styles.btnPrimary,
+              pressed && styles.btnPressed,
+            ]}
+            onPress={handleCreate}
             disabled={loading}
           >
-            <Ionicons name="refresh-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.buttonText}>Tiếp tục phòng đang chơi ({lastPin})</Text>
-          </TouchableOpacity>
-        )}
+            <View style={styles.btnContent}>
+              <Ionicons name="add-circle" size={20} color="#FFFFFF" style={styles.btnIcon} />
+              <Text style={styles.btnTextPrimary}>BẮT ĐẦU BUỔI CHƠI MỚI</Text>
+            </View>
+          </Pressable>
 
-        <TouchableOpacity
-          style={[styles.button, styles.createButton]}
-          onPress={handleCreate}
-          disabled={loading}
-        >
-          <Text style={styles.buttonText}>Tạo phòng Online</Text>
-        </TouchableOpacity>
+          <Pressable
+            style={styles.helpPill}
+            onPress={() => setShowHelpModal(true)}
+          >
+            <Ionicons name="help-circle-outline" size={18} color={DuoTheme.colors.grayText} />
+            <Text style={styles.helpPillText}>Hướng dẫn luật chơi & tính năng</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
 
-        <TouchableOpacity
-          style={[styles.button, styles.offlineButton]}
-          onPress={handleCreateOffline}
-          disabled={loading}
-        >
-          <Text style={styles.buttonText}>Tạo phòng Offline (1 máy)</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.button, styles.joinButton]}
-          onPress={handleJoin}
-          disabled={loading}
-        >
-          <Text style={styles.buttonText}>Tham gia phòng (Online)</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.helpButton, { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]}
-          onPress={() => setShowHelpModal(true)}
-        >
-          <Ionicons name="information-circle-outline" size={18} color="#1a73e8" style={{ marginRight: 5 }} />
-          <Text style={styles.helpButtonText}>Hướng dẫn & Tính năng</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Modal Hướng dẫn & Tính năng */}
+      {/* Modal Hướng dẫn chuẩn Sports-Fintech */}
       <Modal
         visible={showHelpModal}
         transparent={true}
@@ -222,118 +189,74 @@ export default function HomeScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 5 }}>
-              <Ionicons name="trophy" size={28} color="#1a73e8" style={{ marginRight: 8 }} />
-              <Text style={styles.modalTitle}>Volleyball Cashier</Text>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderBadge}>
+                <Ionicons name="book-outline" size={24} color={DuoTheme.colors.primary} />
+              </View>
+              <Text style={styles.modalTitle}>Cẩm Nang Trận Đấu</Text>
+              <Text style={styles.modalSubtitle}>Quy tắc chia tiền & tính năng tự động</Text>
             </View>
-            <Text style={styles.modalSubtitle}>Ứng dụng quản lý tiền cược bóng chuyền tiện lợi</Text>
-            
+
             <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 15, marginBottom: 8 }}>
-                <Ionicons name="locate" size={20} color="#1a73e8" style={{ marginRight: 6 }} />
-                <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0 }]}>Mục đích của app</Text>
-              </View>
-              <Text style={styles.descText}>
-                Volleyball Cashier giúp nhóm chơi bóng chuyền (chơi cược/độ) dễ dàng phân chia đội hình, quản lý người chơi dự bị, tự động ghi nhận kết quả và tính toán số tiền thắng/thua của mỗi người sau mỗi set đấu một cách rõ ràng, minh bạch.
-              </Text>
-
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 15, marginBottom: 8 }}>
-                <Ionicons name="flash" size={20} color="#1a73e8" style={{ marginRight: 6 }} />
-                <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0 }]}>Các tính năng chính</Text>
-              </View>
-              
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="wifi" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Tạo phòng Online</Text>
+              {/* Card 1: Mục đích */}
+              <View style={[styles.guideCard, { borderLeftColor: DuoTheme.colors.primary }]}>
+                <View style={styles.guideCardHeader}>
+                  <Ionicons name="trophy-outline" size={18} color={DuoTheme.colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={styles.guideCardTitle}>Mục đích của App</Text>
                 </View>
-                <Text style={styles.featureDesc}>Host tạo phòng lấy mã PIN, các thành viên khác nhập PIN để tham gia tự chọn đội hoặc xem kết quả thời gian thực trên máy cá nhân.</Text>
+                <Text style={styles.guideCardDesc}>
+                  Tự động ghi nhận set đấu, phân chia số tiền thắng/thua minh bạch theo từng slot thi đấu và người dự bị.
+                </Text>
               </View>
 
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="phone-portrait-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Tạo phòng Offline (1 máy)</Text>
+              {/* Card 2: Quy tắc tính tiền */}
+              <View style={[styles.guideCard, { borderLeftColor: DuoTheme.colors.green }]}>
+                <View style={styles.guideCardHeader}>
+                  <Ionicons name="cash-outline" size={18} color={DuoTheme.colors.green} style={{ marginRight: 8 }} />
+                  <Text style={styles.guideCardTitle}>Quy tắc Thắng / Thua</Text>
                 </View>
-                <Text style={styles.featureDesc}>Hoạt động hoàn toàn không cần internet. Một máy của Host tự quản lý danh sách người chơi, chia đội và ghi nhận toàn bộ kết quả.</Text>
+                <Text style={styles.guideCardDesc}>
+                  • Mỗi người thua trả theo mức cược (mặc định 5.000đ/suất).{Platform.OS === 'web' ? '\n' : '\n'}
+                  • Kèo lệch người (4 vs 5): bên 4 người có thể chọn 1 người &quot;Gánh 2 suất (10.000đ)&quot; để tròn tiền 25k vs 25k.{Platform.OS === 'web' ? '\n' : '\n'}
+                  • Tiền sân cuối buổi làm tròn lên 1.000đ theo đầu người, phần dôi ra được giữ lại làm &quot;Tiền thừa buổi chơi&quot;.
+                </Text>
               </View>
 
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="people" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Chia đội & Thay người</Text>
+              {/* Card 3: Thay người giữa trận */}
+              <View style={[styles.guideCard, { borderLeftColor: DuoTheme.colors.orange }]}>
+                <View style={styles.guideCardHeader}>
+                  <Ionicons name="swap-horizontal-outline" size={18} color={DuoTheme.colors.orange} style={{ marginRight: 8 }} />
+                  <Text style={styles.guideCardTitle}>Cơ chế Thay người (Sub Slot)</Text>
                 </View>
-                <Text style={styles.featureDesc}>Thêm người chơi vào các Đội. Hỗ trợ cơ chế thay người linh hoạt trong lúc set đấu đang diễn ra.</Text>
+                <Text style={styles.guideCardDesc}>
+                  1 Slot = 1 Đơn vị tiền. Khi 2 người chia sẻ 1 slot thay người, tiền thắng hoặc thua của slot đó được chia đôi 50/50 cực kỳ sòng phẳng!
+                </Text>
               </View>
 
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="cash" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Tự động tính toán tiền cược</Text>
+              {/* Card 4: Hoàn tác & Chốt sổ */}
+              <View style={[styles.guideCard, { borderLeftColor: DuoTheme.colors.purple }]}>
+                <View style={styles.guideCardHeader}>
+                  <Ionicons name="receipt-outline" size={18} color={DuoTheme.colors.purple} style={{ marginRight: 8 }} />
+                  <Text style={styles.guideCardTitle}>Chốt sổ & Tiền sân</Text>
                 </View>
-                <Text style={styles.featureDesc}>Số tiền thắng/thua được tính tự động dựa trên mức cược và số người chơi riêng biệt cho từng thành viên.</Text>
-              </View>
-
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="receipt" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Lịch sử & Thanh toán</Text>
-                </View>
-                <Text style={styles.featureDesc}>Xem lại lịch sử chi tiết từng set đấu, hỗ trợ tính năng Hoàn tác (Undo) và tích chọn thanh toán cuối buổi cho từng thành viên.</Text>
-              </View>
-
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 10 }}>
-                <Ionicons name="calculator" size={20} color="#1a73e8" style={{ marginRight: 6 }} />
-                <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0 }]}>Quy định & Luật Cược (Betting)</Text>
-              </View>
-
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="cash-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Mức cược chung của Set</Text>
-                </View>
-                <Text style={styles.featureDesc}>Mức cược mặc định của set đấu (ví dụ 5k, 10k, 20k) áp dụng cho tất cả thành viên tham gia. Tiền thắng/thua được gộp chung theo đội và chia đều cho từng người thi đấu của đội đó.</Text>
-              </View>
-
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="person-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Mức cược riêng (Cược cá nhân)</Text>
-                </View>
-                <Text style={styles.featureDesc}>Nếu một người muốn cược nhiều hơn hoặc ít hơn mức cược chung, họ có thể đặt mức cược riêng. Khi kết thúc set đấu, kết quả thắng/thua của họ sẽ dựa trên mức cược riêng này thay vì mức cược chung của set.</Text>
-              </View>
-
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="swap-horizontal-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Cược đối đầu trực tiếp 1-on-1</Text>
-                </View>
-                <Text style={styles.featureDesc}>Cho phép người chơi đặt cược riêng nhắm thẳng vào một đối thủ cụ thể ở đội kia. Khi kết thúc set đấu, người thắng sẽ nhận tiền trực tiếp từ người thua của cặp đấu này, độc lập hoàn toàn với việc chia quỹ đội chung.</Text>
-              </View>
-
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="people-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Chia sẻ tiền cược khi Thay người</Text>
-                </View>
-                <Text style={styles.featureDesc}>Nếu một slot trong đội có thay người giữa trận (bao gồm cả Starter khởi động và Sub dự bị vào thay), số tiền thắng/thua của slot đó sẽ được chia đôi (50-50) giữa hai người chơi để đảm bảo tính công bằng.</Text>
-              </View>
-
-              <View style={styles.featureItem}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Ionicons name="git-commit-outline" size={16} color="#1a73e8" style={{ marginRight: 6 }} />
-                  <Text style={styles.featureTitle}>Quy tắc làm tròn số tiền</Text>
-                </View>
-                <Text style={styles.featureDesc}>Để dễ dàng trao đổi tiền lẻ ngoài đời, mọi số tiền lẻ phát sinh từ việc chia đều hoặc chia đôi thay người sẽ tự động được làm tròn đến bội số gần nhất của 1.000đ. Hệ thống tự động cân đối quỹ để đảm bảo tổng số tiền thay đổi của tất cả người chơi luôn bằng 0đ.</Text>
+                <Text style={styles.guideCardDesc}>
+                  Dễ dàng chỉnh sửa đội thắng set đấu cũ ngay trong Lịch sử. Cuối buổi nhập tiền sân để chia đều hoặc chia theo số set đã đấu.
+                </Text>
               </View>
             </ScrollView>
 
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionBtn,
+                styles.btnPrimary,
+                pressed && styles.btnPressed,
+                { marginTop: 16 },
+              ]}
               onPress={() => setShowHelpModal(false)}
             >
-              <Text style={styles.modalCloseText}>Đóng</Text>
-            </TouchableOpacity>
+              <Text style={styles.btnTextPrimary}>ĐÃ HIỂU LUẬT CHƠI</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -342,32 +265,207 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f4f8' },
-  content: { flex: 1, justifyContent: 'center', paddingHorizontal: 30 },
-  title: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', marginBottom: 5, color: '#1a73e8' },
-  subtitle: { fontSize: 16, textAlign: 'center', marginBottom: 40, color: '#666' },
-  input: {
-    backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd',
-    borderRadius: 10, padding: 15, fontSize: 16, marginBottom: 15,
+  container: {
+    flex: 1,
+    backgroundColor: DuoTheme.colors.background,
   },
-  button: { padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 12 },
-  createButton: { backgroundColor: '#1a73e8' },
-  resumeButton: { backgroundColor: '#f9ab00' },
-  offlineButton: { backgroundColor: '#5f6368' },
-  joinButton: { backgroundColor: '#34a853' },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  helpButton: { marginTop: 15, alignItems: 'center', padding: 10 },
-  helpButtonText: { color: '#1a73e8', fontSize: 14, fontWeight: '600', textDecorationLine: 'underline' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { backgroundColor: '#fff', width: '90%', maxHeight: '80%', borderRadius: 15, padding: 20 },
-  modalScroll: { marginVertical: 15 },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', color: '#1a73e8', marginBottom: 5 },
-  modalSubtitle: { fontSize: 13, color: '#666', textAlign: 'center', marginBottom: 10, fontStyle: 'italic' },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', marginTop: 15, marginBottom: 8, color: '#333' },
-  descText: { fontSize: 14, color: '#555', lineHeight: 20 },
-  featureItem: { marginBottom: 12, borderLeftWidth: 3, borderLeftColor: '#1a73e8', paddingLeft: 10 },
-  featureTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 2 },
-  featureDesc: { fontSize: 13, color: '#666', lineHeight: 18 },
-  modalCloseBtn: { backgroundColor: '#1a73e8', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 10 },
-  modalCloseText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 36,
+  },
+  brandSection: {
+    alignItems: 'center',
+    marginBottom: 28,
+  },
+  logoBadge: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: DuoTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    ...DuoTheme.shadows.button,
+  },
+  brandTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: DuoTheme.colors.grayDark,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  brandSubtitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: DuoTheme.colors.grayText,
+    marginTop: 6,
+  },
+  cardContainer: {
+    backgroundColor: DuoTheme.colors.card,
+    borderRadius: DuoTheme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    padding: 22,
+    ...DuoTheme.shadows.card,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: DuoTheme.colors.grayDark,
+    marginBottom: 8,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: DuoTheme.colors.borderDark,
+    borderRadius: DuoTheme.borderRadius.md,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: {
+    flex: 1,
+    height: 50,
+    fontSize: 15,
+    fontWeight: '600',
+    color: DuoTheme.colors.grayDark,
+  },
+
+  /* Buttons */
+  actionBtn: {
+    borderRadius: DuoTheme.borderRadius.md,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  btnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.99 }],
+  },
+  btnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnIcon: {
+    marginRight: 8,
+  },
+  btnPrimary: {
+    backgroundColor: DuoTheme.colors.primary,
+    ...DuoTheme.shadows.button,
+  },
+  btnResume: {
+    backgroundColor: DuoTheme.colors.yellowLight,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  btnTextPrimary: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  btnTextResume: {
+    color: '#92400E',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  helpPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 4,
+    borderRadius: DuoTheme.borderRadius.full,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+  },
+  helpPillText: {
+    color: DuoTheme.colors.grayText,
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+
+  /* Modal */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '85%',
+    borderRadius: DuoTheme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    padding: 22,
+    ...DuoTheme.shadows.card,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalHeaderBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: DuoTheme.colors.primaryLight,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: DuoTheme.colors.grayDark,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: DuoTheme.colors.grayText,
+    marginTop: 3,
+  },
+  modalScroll: {
+    marginVertical: 4,
+  },
+  guideCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: DuoTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    borderLeftWidth: 4,
+    padding: 12,
+    marginBottom: 10,
+  },
+  guideCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  guideCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: DuoTheme.colors.grayDark,
+  },
+  guideCardDesc: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: DuoTheme.colors.grayText,
+    lineHeight: 19,
+  },
 });

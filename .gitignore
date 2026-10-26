@@ -42,3 +42,11 @@ app-example
 # generated native folders
 /ios
 /android
+
+# AI & Tool Scratches
+.agents/
+.claude/
+.cursor/
+.hermes/
+design-system/
+plans/

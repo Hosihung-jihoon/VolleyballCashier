@@ -76,6 +76,21 @@ export const calculateSettlement = (firstArg, ...args) => {
     }
   });
 
+  // ponytail: if direct bets starve one team's active pool while the other has active pool players,
+  // release those direct bets to pool bets so remaining teammates are not left with 0 payout
+  const winningActiveCount = winningSlots.flat().filter(pid => !hasDirectBet[pid]).length;
+  const losingActiveCount = losingSlots.flat().filter(pid => !hasDirectBet[pid]).length;
+
+  if ((winningActiveCount === 0 && losingActiveCount > 0) || (losingActiveCount === 0 && winningActiveCount > 0)) {
+    Object.keys(directBets).forEach(pid => {
+      delete hasDirectBet[pid];
+      if (directBets[pid].targetPlayerId) {
+        delete hasDirectBet[directBets[pid].targetPlayerId];
+      }
+      delete directBets[pid];
+    });
+  }
+
   // Settle direct bets first
   allPlayingPids.forEach(pid => {
     if (directBets[pid]) {

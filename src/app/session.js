@@ -3,8 +3,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { DuoTheme } from '../constants/theme';
 import { calculateSettlement } from '../lib/bettingEngine';
-import { addPlayerToSession, addSideMatch, deleteSideMatch, addTeamToSession, deleteTeamFromSession, finishSession, finishSet, finishSideSet, startNewSet, startNewSideSet, subscribeToSession, togglePlayerSettled, undoFinishSession, undoSet, undoSideSet, updateMatchup, updatePlayerBet, updateSetBetAmount, updateSetTeams, updateSidePlayerBet, updateSideSetBetAmount, updateSideSetTeams } from '../lib/sessionApi';
+import { addPlayerToSession, addSideMatch, deleteSideMatch, addTeamToSession, deleteTeamFromSession, finishSession, finishSet, finishSideSet, startNewSet, startNewSideSet, subscribeToSession, togglePlayerSettled, undoFinishSession, undoSet, undoSideSet, updateMatchup, updatePlayerBet, updateSetBetAmount, updateSetTeams, updateSetWinner, updateSidePlayerBet, updateSideSetBetAmount, updateSideSetTeams, updateSideSetWinner } from '../lib/sessionApi';
+
+const formatMoney = (val) => {
+  if (val === null || val === undefined || val === '') return '';
+  const num = parseInt(val.toString().replace(/\D/g, ''), 10);
+  return isNaN(num) ? '' : num.toLocaleString('vi-VN');
+};
+
+const parseMoney = (str) => {
+  if (!str) return 0;
+  return parseInt(str.toString().replace(/\D/g, ''), 10) || 0;
+};
 
 const showAlert = (title, message, buttons = []) => {
   if (Platform.OS === 'web') {
@@ -194,217 +206,75 @@ export default function SessionScreen() {
     return Object.keys(players).filter(pid => !playersInTeams.includes(pid));
   };
 
-  const getActivePlayersWarning = () => {
-    if (!latestSet || latestSet.status !== 'playing') return null;
+  // ponytail: single source of truth calculateSettlement for accurate payout preview
+  const computePayoutWarning = (setData, isSide = false) => {
+    if (!setData || setData.status !== 'playing') return null;
 
-    const [lKey, rKey] = normalizeMatchup(latestSet.matchup);
-    const lData = latestSet.teams?.[lKey] || latestSet[lKey] || { slots: {} };
-    const rData = latestSet.teams?.[rKey] || latestSet[rKey] || { slots: {} };
-
-    const leftPids = [];
-    Object.values(lData.slots || {}).forEach(slot => slot.forEach(pid => leftPids.push(pid)));
-    const rightPids = [];
-    Object.values(rData.slots || {}).forEach(slot => slot.forEach(pid => rightPids.push(pid)));
-
-    const allPlayingPids = [...leftPids, ...rightPids];
-    const playerBets = latestSet.playerBets || {};
-
-    const getBetInfo = (val) => {
-      if (val && typeof val === 'object') {
-        return { amount: Number(val.amount) || 0, targetPlayerId: val.targetPlayerId || null };
-      }
-      if (typeof val === 'number') return { amount: val, targetPlayerId: null };
-      if (typeof val === 'string') return { amount: Number(val) || 0, targetPlayerId: null };
-      return null;
+    const [lKey, rKey] = isSide ? ['teamA', 'teamB'] : normalizeMatchup(setData.matchup);
+    const teamsMap = setData.teams || {
+      teamA: setData.teamA || { slots: {} },
+      teamB: setData.teamB || { slots: {} },
+      teamC: !isSide ? (setData.teamC || { slots: {} }) : undefined
     };
 
-    const hasDirectBet = {};
-    allPlayingPids.forEach(pid => {
-      const rawBet = playerBets[pid];
-      const betInfo = getBetInfo(rawBet);
-      if (betInfo && betInfo.targetPlayerId && allPlayingPids.includes(betInfo.targetPlayerId)) {
-        hasDirectBet[pid] = true;
-        hasDirectBet[betInfo.targetPlayerId] = true;
-      }
-    });
-
-    const activeLeft = leftPids.filter(pid => !hasDirectBet[pid]);
-    const activeRight = rightPids.filter(pid => !hasDirectBet[pid]);
-
-    const nL = activeLeft.length;
-    const nR = activeRight.length;
-    
-    if (nL > 0 && nR > 0 && nL !== nR) {
-      const defaultBet = latestSet.betAmount || 5000;
-      
-      // Left wins
-      let totalCollectedFromRight = 0;
-      activeRight.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const roundedLoss = Math.ceil((pBet / nR) / 1000) * 1000;
-        totalCollectedFromRight += roundedLoss;
-      });
-
-      let totalExpectedLeft = 0;
-      activeLeft.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        totalExpectedLeft += pBet / nL;
-      });
-
-      const leftPayouts = activeLeft.map(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const rawWin = pBet / nL;
-        const win = totalExpectedLeft > 0 ? rawWin * (totalCollectedFromRight / totalExpectedLeft) : 0;
-        const roundedWin = Math.round(win / 1000) * 1000;
-        return { name: players[pid]?.name || pid, win: roundedWin };
-      });
-
-      // Right wins
-      let totalCollectedFromLeft = 0;
-      activeLeft.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const roundedLoss = Math.ceil((pBet / nL) / 1000) * 1000;
-        totalCollectedFromLeft += roundedLoss;
-      });
-
-      let totalExpectedRight = 0;
-      activeRight.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        totalExpectedRight += pBet / nR;
-      });
-
-      const rightPayouts = activeRight.map(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const rawWin = pBet / nR;
-        const win = totalExpectedRight > 0 ? rawWin * (totalCollectedFromLeft / totalExpectedRight) : 0;
-        const roundedWin = Math.round(win / 1000) * 1000;
-        return { name: players[pid]?.name || pid, win: roundedWin };
-      });
-
-      return {
-        nL,
-        nR,
-        leftLabel: getTeamLabel(lKey),
-        rightLabel: getTeamLabel(rKey),
-        leftPayouts,
-        rightPayouts
-      };
-    }
-
-    return null;
-  };
-
-  const getActivePlayersWarningForSide = () => {
-    if (!latestSideSet || latestSideSet.status !== 'playing') return null;
-
-    const lKey = 'teamA';
-    const rKey = 'teamB';
-    const lData = latestSideSet.teams?.[lKey] || { slots: {} };
-    const rData = latestSideSet.teams?.[rKey] || { slots: {} };
+    const lData = teamsMap[lKey] || { slots: {} };
+    const rData = teamsMap[rKey] || { slots: {} };
 
     const leftPids = [];
-    Object.values(lData.slots || {}).forEach(slot => slot.forEach(pid => leftPids.push(pid)));
+    Object.values(lData.slots || {}).forEach(slot => {
+      if (Array.isArray(slot)) leftPids.push(...slot);
+    });
     const rightPids = [];
-    Object.values(rData.slots || {}).forEach(slot => slot.forEach(pid => rightPids.push(pid)));
-
-    const allPlayingPids = [...leftPids, ...rightPids];
-    const playerBets = latestSideSet.playerBets || {};
-
-    const getBetInfo = (val) => {
-      if (val && typeof val === 'object') {
-        return { amount: Number(val.amount) || 0, targetPlayerId: val.targetPlayerId || null };
-      }
-      if (typeof val === 'number') return { amount: val, targetPlayerId: null };
-      if (typeof val === 'string') return { amount: Number(val) || 0, targetPlayerId: null };
-      return null;
-    };
-
-    const hasDirectBet = {};
-    allPlayingPids.forEach(pid => {
-      const rawBet = playerBets[pid];
-      const betInfo = getBetInfo(rawBet);
-      if (betInfo && betInfo.targetPlayerId && allPlayingPids.includes(betInfo.targetPlayerId)) {
-        hasDirectBet[pid] = true;
-        hasDirectBet[betInfo.targetPlayerId] = true;
-      }
+    Object.values(rData.slots || {}).forEach(slot => {
+      if (Array.isArray(slot)) rightPids.push(...slot);
     });
 
-    const activeLeft = leftPids.filter(pid => !hasDirectBet[pid]);
-    const activeRight = rightPids.filter(pid => !hasDirectBet[pid]);
+    const nL = leftPids.length;
+    const nR = rightPids.length;
+    if (nL === 0 || nR === 0) return null;
 
-    const nL = activeLeft.length;
-    const nR = activeRight.length;
-    
-    if (nL > 0 && nR > 0 && nL !== nR) {
-      const defaultBet = latestSideSet.betAmount || 5000;
-      
-      // Left wins
-      let totalCollectedFromRight = 0;
-      activeRight.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const roundedLoss = Math.ceil((pBet / nR) / 1000) * 1000;
-        totalCollectedFromRight += roundedLoss;
-      });
+    const defaultBet = setData.betAmount || 5000;
+    const playerBets = setData.playerBets || {};
 
-      let totalExpectedLeft = 0;
-      activeLeft.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        totalExpectedLeft += pBet / nL;
-      });
+    // Mô phỏng chính xác bằng calculateSettlement
+    const simLeft = calculateSettlement(teamsMap, setData.matchup, lKey, defaultBet, playerBets).balanceChanges;
+    const simRight = calculateSettlement(teamsMap, setData.matchup, rKey, defaultBet, playerBets).balanceChanges;
 
-      const leftPayouts = activeLeft.map(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const rawWin = pBet / nL;
-        const win = totalExpectedLeft > 0 ? rawWin * (totalCollectedFromRight / totalExpectedLeft) : 0;
-        const roundedWin = Math.round(win / 1000) * 1000;
-        return { name: players[pid]?.name || pid, win: roundedWin };
-      });
+    const getExpectedWin = (pid) => {
+      const raw = playerBets[pid];
+      if (raw && typeof raw === 'object') return Number(raw.amount) || defaultBet;
+      if (typeof raw === 'number' || typeof raw === 'string') return Number(raw) || defaultBet;
+      return defaultBet;
+    };
 
-      // Right wins
-      let totalCollectedFromLeft = 0;
-      activeLeft.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const roundedLoss = Math.ceil((pBet / nL) / 1000) * 1000;
-        totalCollectedFromLeft += roundedLoss;
-      });
+    // Kiểm tra xem có người chơi nào nhận payout lệch khỏi mức cược không
+    const isLeftImbalanced = leftPids.some(pid => Math.abs((simLeft[pid] || 0) - getExpectedWin(pid)) >= 500);
+    const isRightImbalanced = rightPids.some(pid => Math.abs((simRight[pid] || 0) - getExpectedWin(pid)) >= 500);
 
-      let totalExpectedRight = 0;
-      activeRight.forEach(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        totalExpectedRight += pBet / nR;
-      });
+    // Nếu cả 2 đội đều nhận đúng 100% tiền cược (đã cân tiền) -> Không cần hiện banner cảnh báo
+    if (!isLeftImbalanced && !isRightImbalanced) return null;
 
-      const rightPayouts = activeRight.map(pid => {
-        const betInfo = getBetInfo(playerBets[pid]);
-        const pBet = betInfo ? betInfo.amount : defaultBet;
-        const rawWin = pBet / nR;
-        const win = totalExpectedRight > 0 ? rawWin * (totalCollectedFromLeft / totalExpectedRight) : 0;
-        const roundedWin = Math.round(win / 1000) * 1000;
-        return { name: players[pid]?.name || pid, win: roundedWin };
-      });
+    const leftLabel = isSide ? 'Team A' : getTeamLabel(lKey);
+    const rightLabel = isSide ? 'Team B' : getTeamLabel(rKey);
 
-      return {
-        nL,
-        nR,
-        leftLabel: 'Team A',
-        rightLabel: 'Team B',
-        leftPayouts,
-        rightPayouts
-      };
-    }
+    const leftPayouts = leftPids.map(pid => ({
+      name: players[pid]?.name || pid,
+      win: Math.max(0, simLeft[pid] || 0)
+    }));
 
-    return null;
+    const rightPayouts = rightPids.map(pid => ({
+      name: players[pid]?.name || pid,
+      win: Math.max(0, simRight[pid] || 0)
+    }));
+
+    return {
+      nL,
+      nR,
+      leftLabel,
+      rightLabel,
+      leftPayouts,
+      rightPayouts
+    };
   };
 
   const handleCreateSideMatch = async () => {
@@ -472,7 +342,9 @@ export default function SessionScreen() {
 
     const targetTeam = { ...teamsMap[teamKey] } || { slots: {} };
     const slots = { ...targetTeam.slots };
-    slots[`slot_${Object.keys(slots).length + 1}`] = [pid];
+    const existingNums = Object.keys(slots).map(k => parseInt(k.replace('slot_', '')) || 0);
+    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+    slots[`slot_${nextNum}`] = [pid];
     targetTeam.slots = slots;
     teamsMap[teamKey] = targetTeam;
 
@@ -643,8 +515,8 @@ export default function SessionScreen() {
 
   // Xử lý thay đổi tiền cược set đang đấu
   const handleBetAmountChange = async (val) => {
-    setBetAmount(val);
-    const amount = parseInt(val) || 0;
+    const amount = parseMoney(val);
+    setBetAmount(amount ? amount.toString() : '');
     if (latestSet && latestSet.status === 'playing' && isHost) {
       await updateSetBetAmount(pin, latestSetId, amount);
     }
@@ -679,11 +551,28 @@ export default function SessionScreen() {
 
   // Xử lý thay đổi tiền cược set kèo phụ đang đấu
   const handleSideBetAmountChange = async (val) => {
-    setSideBetAmountInput(val);
-    const amount = parseInt(val) || 0;
+    const amount = parseMoney(val);
+    setSideBetAmountInput(amount ? amount.toString() : '');
     if (latestSideSet && latestSideSet.status === 'playing' && isHost) {
       await updateSideSetBetAmount(pin, latestSideSetId, amount);
     }
+  };
+
+  const getPlayerTeamSize = (pid) => {
+    const isSide = activeTab === 'side';
+    const activeSetData = isSide ? latestSideSet : latestSet;
+    if (!activeSetData) return 0;
+    const teamsMap = activeSetData.teams || {
+      teamA: activeSetData.teamA || { slots: {} },
+      teamB: activeSetData.teamB || { slots: {} },
+      teamC: !isSide ? (activeSetData.teamC || { slots: {} }) : undefined
+    };
+    for (const tData of Object.values(teamsMap)) {
+      if (!tData) continue;
+      const pids = Object.values(tData.slots || {}).flat();
+      if (pids.includes(pid)) return pids.length;
+    }
+    return 0;
   };
 
   const getOpponentsForPlayer = (pid) => {
@@ -901,14 +790,60 @@ export default function SessionScreen() {
     router.replace('/');
   };
 
+  const getStreakInfo = () => {
+    if (!session?.sets) return null;
+    const sortedSets = Object.entries(session.sets)
+      .filter(([_, s]) => s.status === 'completed' && s.winner)
+      .sort((a, b) => {
+        const numA = parseInt(a[0].replace('set_', '')) || 0;
+        const numB = parseInt(b[0].replace('set_', '')) || 0;
+        return numB - numA;
+      });
+    if (sortedSets.length === 0) return null;
+    const lastWinner = sortedSets[0][1].winner;
+    let count = 0;
+    for (const [_, s] of sortedSets) {
+      if (s.winner === lastWinner) count++;
+      else break;
+    }
+    return { winner: lastWinner, count };
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity onPress={handleGoBack} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backBtn} activeOpacity={0.7}>
+            <Ionicons name="arrow-back" size={20} color={DuoTheme.colors.grayDark} />
           </TouchableOpacity>
-          <Text style={styles.pinText}>PIN: {pin} ({isHost ? 'Host' : 'Mem'})</Text>
+          <View>
+            <Text style={styles.headerTitle}>Sổ Kèo Trận Đấu</Text>
+            <Text style={styles.headerSubtitle}>
+              {latestSetId ? `Set ${latestSetId.replace('set_', '')} • ${latestSet?.status === 'playing' ? 'Đang diễn ra' : 'Đã xong'}` : 'Chưa bắt đầu'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {/* Tiền thừa sân (Surplus) */}
+          {(session.courtFee?.surplus > 0) && (
+            <View style={styles.surplusChip}>
+              <Ionicons name="cash-outline" size={14} color="#059669" style={{ marginRight: 4 }} />
+              <Text style={styles.surplusChipText}>Thừa: {formatMoney(session.courtFee.surplus)}đ</Text>
+            </View>
+          )}
+
+          {/* Win Streak vector */}
+          {(() => {
+            const streak = getStreakInfo();
+            if (!streak || streak.count < 2) return null;
+            return (
+              <View style={styles.streakBadge}>
+                <Ionicons name="flame" size={15} color="#EA580C" style={{ marginRight: 2 }} />
+                <Text style={styles.streakText}>{streak.count}</Text>
+              </View>
+            );
+          })()}
         </View>
       </View>
 
@@ -939,6 +874,7 @@ export default function SessionScreen() {
               <Text style={styles.checkoutTitle}>Buổi chơi đã kết thúc</Text>
               <Text style={styles.checkoutSub}>
                 Tổng tiền sân: {parseInt(session.courtFee?.total || 0).toLocaleString('vi-VN')}đ ({session.courtFee?.splitMethod === 'equal' ? 'Chia đều' : 'Chia theo set'}).
+                {session.courtFee?.surplus > 0 ? ` Tiền thừa: ${session.courtFee.surplus.toLocaleString('vi-VN')}đ.` : ''}
               </Text>
             </View>
           </View>
@@ -1021,28 +957,30 @@ export default function SessionScreen() {
         )}
 
         {(() => {
-          const warning = getActivePlayersWarning();
+          const warning = computePayoutWarning(latestSet, false);
           if (!warning) return null;
           return (
             <View style={styles.warningCard}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                 <Ionicons name="warning" size={18} color="#ea4335" style={{ marginRight: 6 }} />
-                <Text style={styles.warningTitle}>Lực lượng cược chính không cân ({warning.nL} vs {warning.nR})</Text>
+                <Text style={styles.warningTitle}>Lực lượng cược chưa cân ({warning.nL} vs {warning.nR})</Text>
               </View>
               <Text style={styles.warningText}>
-                Do một số người chơi có cược riêng, số lượng người tham gia cược chính bị chênh lệch. Payout dự kiến nếu thắng:
+                {Math.abs(warning.nL - warning.nR) === 1
+                  ? `Đội ${warning.nL < warning.nR ? warning.leftLabel : warning.rightLabel} đang ít hơn 1 người. 1 người có thể cược ${formatMoney((latestSet?.betAmount || 5000) * 2)}đ để 2 đội cân tiền. Payout dự kiến nếu giữ nguyên:`
+                  : 'Tiền cược 2 bên đang chênh lệch. Payout dự kiến nếu thắng:'}
               </Text>
               <View style={styles.warningDetails}>
                 <View style={styles.warningCol}>
                   <Text style={styles.warningColHeader}>{warning.leftLabel} thắng:</Text>
                   {warning.leftPayouts.map((p, idx) => (
-                    <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{p.win.toLocaleString('vi-VN')}đ</Text>
+                    <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{formatMoney(p.win)}đ</Text>
                   ))}
                 </View>
                 <View style={styles.warningCol}>
                   <Text style={styles.warningColHeader}>{warning.rightLabel} thắng:</Text>
                   {warning.rightPayouts.map((p, idx) => (
-                    <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{p.win.toLocaleString('vi-VN')}đ</Text>
+                    <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{formatMoney(p.win)}đ</Text>
                   ))}
                 </View>
               </View>
@@ -1172,28 +1110,30 @@ export default function SessionScreen() {
             )}
 
             {(() => {
-              const warning = getActivePlayersWarningForSide();
+              const warning = computePayoutWarning(latestSideSet, true);
               if (!warning) return null;
               return (
                 <View style={styles.warningCard}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                     <Ionicons name="warning" size={18} color="#ea4335" style={{ marginRight: 6 }} />
-                    <Text style={styles.warningTitle}>Lực lượng cược phụ không cân ({warning.nL} vs {warning.nR})</Text>
+                    <Text style={styles.warningTitle}>Lực lượng cược chưa cân ({warning.nL} vs {warning.nR})</Text>
                   </View>
                   <Text style={styles.warningText}>
-                    Do một số người chơi có cược riêng, số lượng người tham gia cược bị chênh lệch. Payout dự kiến nếu thắng:
+                    {Math.abs(warning.nL - warning.nR) === 1
+                      ? `Đội ${warning.nL < warning.nR ? warning.leftLabel : warning.rightLabel} đang ít hơn 1 người. 1 người có thể cược ${formatMoney((latestSideSet?.betAmount || 5000) * 2)}đ để 2 đội cân tiền. Payout dự kiến nếu giữ nguyên:`
+                      : 'Tiền cược 2 bên đang chênh lệch. Payout dự kiến nếu thắng:'}
                   </Text>
                   <View style={styles.warningDetails}>
                     <View style={styles.warningCol}>
                       <Text style={styles.warningColHeader}>{warning.leftLabel} thắng:</Text>
                       {warning.leftPayouts.map((p, idx) => (
-                        <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{p.win.toLocaleString('vi-VN')}đ</Text>
+                        <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{formatMoney(p.win)}đ</Text>
                       ))}
                     </View>
                     <View style={styles.warningCol}>
                       <Text style={styles.warningColHeader}>{warning.rightLabel} thắng:</Text>
                       {warning.rightPayouts.map((p, idx) => (
-                        <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{p.win.toLocaleString('vi-VN')}đ</Text>
+                        <Text key={idx} style={styles.warningPayoutText}>• {p.name}: +{formatMoney(p.win)}đ</Text>
                       ))}
                     </View>
                   </View>
@@ -1302,6 +1242,7 @@ export default function SessionScreen() {
                 const setIndex = parseInt(setId.replace('set_', '')) || 0;
                 return {
                   id: setId,
+                  setIndex,
                   type: 'main_set',
                   completedAt: s.completedAt || (session.createdAt ? (session.createdAt + setIndex * 1000 * 60 * 30) : 0),
                   data: s
@@ -1325,6 +1266,7 @@ export default function SessionScreen() {
               const setIndex = parseInt(setId.replace('side_set_', '')) || 0;
               return {
                 id: setId,
+                setIndex,
                 type: 'side_set',
                 completedAt: s.completedAt || (session.createdAt ? (session.createdAt + setIndex * 1000 * 60 * 30) : 0),
                 localSetNumber,
@@ -1333,7 +1275,10 @@ export default function SessionScreen() {
               };
             });
 
-            const mergedList = [...completedMainSets, ...completedSideSets].sort((a, b) => b.completedAt - a.completedAt);
+            const mergedList = [...completedMainSets, ...completedSideSets].sort((a, b) => {
+              if (b.setIndex !== a.setIndex) return b.setIndex - a.setIndex;
+              return (b.completedAt || 0) - (a.completedAt || 0);
+            });
 
             if (mergedList.length === 0) {
               return <Text style={{color:'#999', fontSize: 12}}>Chưa có set đấu hay kèo phụ nào hoàn thành</Text>;
@@ -1354,6 +1299,11 @@ export default function SessionScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Ionicons name="bookmark-outline" size={14} color="#1a73e8" style={{ marginRight: 6 }} />
                       <Text style={styles.historyText}>Set {setId.replace('set_', '')}: {getTeamLabel(s.winner)} thắng</Text>
+                      {s.isEdited && (
+                        <View style={{ backgroundColor: '#fff3e0', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, marginLeft: 6, borderWidth: 1, borderColor: '#ff9800' }}>
+                          <Text style={{ fontSize: 10, color: '#e65100', fontWeight: 'bold' }}>Đã sửa</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.historySub}>
                       Cược: {parseInt(s.betAmount || 5000).toLocaleString('vi-VN')}đ | Trận: {getTeamLabel(l)} vs {getTeamLabel(r)}{hasCustomBets ? ' (Có cược riêng)' : ''}
@@ -1373,6 +1323,11 @@ export default function SessionScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Ionicons name="bookmark" size={14} color="#34a853" style={{ marginRight: 6 }} />
                       <Text style={styles.historyText}>{item.matchName} - Set {item.localSetNumber}: {s.winner === 'teamA' ? 'Team A' : 'Team B'} thắng</Text>
+                      {s.isEdited && (
+                        <View style={{ backgroundColor: '#fff3e0', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, marginLeft: 6, borderWidth: 1, borderColor: '#ff9800' }}>
+                          <Text style={{ fontSize: 10, color: '#e65100', fontWeight: 'bold' }}>Đã sửa</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.historySub}>
                       Cược: {parseInt(s.betAmount || 5000).toLocaleString('vi-VN')}đ | Trận: Team A vs Team B{hasCustomBets ? ' (Có cược riêng)' : ''}
@@ -1386,8 +1341,11 @@ export default function SessionScreen() {
 
         {/* Bảng thanh toán cuối buổi */}
         <View style={styles.summaryContainer}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={[styles.sectionTitle, { flex: 1, marginRight: 10 }]}>Thanh toán cuối buổi (Chạm tên xem chi tiết):</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+              <Ionicons name="trophy" size={20} color={DuoTheme.colors.yellowDark} style={{ marginRight: 6 }} />
+              <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Thanh toán & Chốt sổ</Text>
+            </View>
             {isHost && session.meta?.status !== 'finished' && (
               <TouchableOpacity 
                 style={styles.finishSessionBtn}
@@ -1396,10 +1354,30 @@ export default function SessionScreen() {
                   setFinishModalVisible(true);
                 }}
               >
-                <Text style={styles.finishSessionBtnText}>Kết thúc buổi chơi</Text>
+                <Text style={styles.finishSessionBtnText}>Kết thúc buổi</Text>
               </TouchableOpacity>
             )}
           </View>
+
+          {/* Duolingo Gamification Progress Bar */}
+          {(() => {
+            const playerList = Object.entries(players);
+            const totalP = playerList.length;
+            const settledP = playerList.filter(([_, p]) => p.isSettled).length;
+            const pct = totalP > 0 ? Math.round((settledP / totalP) * 100) : 0;
+            return (
+              <View style={styles.progressContainer}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={styles.progressLabel}>Tiến độ thanh toán:</Text>
+                  <Text style={styles.progressValue}>{settledP}/{totalP} người ({pct}%)</Text>
+                </View>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${pct}%` }]} />
+                </View>
+              </View>
+            );
+          })()}
+
           {Object.entries(players).map(([pid, p]) => {
             const balance = Math.round(p.balance || 0);
             const isSettled = p.isSettled || false;
@@ -1410,38 +1388,59 @@ export default function SessionScreen() {
             return (
               <View key={pid} style={[styles.playerBalanceRow, isSettled && styles.settledRow]}>
                 <TouchableOpacity 
-                  style={{flex: 1, paddingVertical: 5, flexDirection: 'row', alignItems: 'center'}} 
+                  style={{ flex: 1, paddingVertical: 4, flexDirection: 'row', alignItems: 'center' }} 
                   onPress={() => setLedgerModalData({ playerId: pid, name: p.name })}
                 >
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.playerName, isSettled && styles.settledText]}>
-                      {p.name} {isSettled ? '(Đã xong)' : ''}
+                  <View style={[styles.playerAvatar, { backgroundColor: isSettled ? '#E2E8F0' : '#EFF6FF' }]}>
+                    <Text style={[styles.playerAvatarText, { color: isSettled ? '#64748B' : DuoTheme.colors.primary }]}>
+                      {(p.name || 'P').charAt(0).toUpperCase()}
                     </Text>
-                    {session.meta?.status === 'finished' && courtFeeShare > 0 && (
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={[styles.playerName, isSettled && styles.settledText]}>
+                        {p.name}
+                      </Text>
+                      {isSettled && (
+                        <View style={styles.settledBadge}>
+                          <Ionicons name="checkmark-circle" size={13} color={DuoTheme.colors.green} />
+                          <Text style={styles.settledBadgeText}>Đã thu</Text>
+                        </View>
+                      )}
+                    </View>
+                    {session.meta?.status === 'finished' && courtFeeShare > 0 ? (
                       <Text style={styles.playerBreakdownText}>
-                        Cược: {balanceBeforeCourtFee > 0 ? '+' : ''}{balanceBeforeCourtFee.toLocaleString('vi-VN')}đ | Sân: -{courtFeeShare.toLocaleString('vi-VN')}đ
+                        Cược: {balanceBeforeCourtFee > 0 ? '+' : ''}{formatMoney(balanceBeforeCourtFee)}đ | Sân: -{formatMoney(courtFeeShare)}đ
+                      </Text>
+                    ) : (
+                      <Text style={styles.playerTapLedgerHint}>
+                        Xem chi tiết sổ cái
                       </Text>
                     )}
                   </View>
-                  <Ionicons name="receipt-outline" size={14} color="#666" style={{ marginLeft: 6 }} />
+                  <Ionicons name="receipt-outline" size={15} color={DuoTheme.colors.grayMuted} style={{ marginLeft: 6, marginRight: 8 }} />
                 </TouchableOpacity>
                 
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Text style={{ 
-                    color: balance > 0 ? 'green' : balance < 0 ? 'red' : 'black', 
-                    fontWeight: 'bold', 
+                    color: balance > 0 ? DuoTheme.colors.green : balance < 0 ? DuoTheme.colors.red : DuoTheme.colors.grayDark, 
+                    fontWeight: '800', 
+                    fontSize: 15,
                     marginRight: 10,
                     textDecorationLine: isSettled ? 'line-through' : 'none'
                   }}>
-                    {balance > 0 ? '+' : ''}{balance.toLocaleString('vi-VN')}đ
+                    {balance > 0 ? '+' : ''}{formatMoney(balance)}đ
                   </Text>
                   
                   {isHost && (
                     <TouchableOpacity 
-                      style={[styles.settleBtn, { backgroundColor: isSettled ? '#f9ab00' : '#34a853' }]} 
+                      style={[
+                        styles.settleBtn, 
+                        isSettled ? styles.settleBtnUndo : styles.settleBtnDone
+                      ]} 
                       onPress={() => togglePlayerSettled(pin, pid, !isSettled)}
                     >
-                      <Text style={styles.settleBtnText}>{isSettled ? 'Hoàn tác' : 'Xong'}</Text>
+                      <Text style={styles.settleBtnText}>{isSettled ? 'Sửa' : 'Thu'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1474,8 +1473,8 @@ export default function SessionScreen() {
                       style={[styles.addPlayerInput, { width: '100%', marginBottom: 15, paddingVertical: 10 }]}
                       keyboardType="numeric"
                       placeholder="Tổng tiền sân (đ)..."
-                      value={courtFeeInput}
-                      onChangeText={setCourtFeeInput}
+                      value={formatMoney(courtFeeInput)}
+                      onChangeText={(val) => setCourtFeeInput(parseMoney(val).toString())}
                       autoFocus
                     />
 
@@ -1705,9 +1704,9 @@ export default function SessionScreen() {
                       <TextInput
                         style={[styles.addPlayerInput, { width: '100%', paddingVertical: 8 }]}
                         keyboardType="numeric"
-                        placeholder="VD: 5000"
-                        value={newSideMatchBetAmount}
-                        onChangeText={setNewSideMatchBetAmount}
+                        placeholder="VD: 5.000"
+                        value={formatMoney(newSideMatchBetAmount)}
+                        onChangeText={(val) => setNewSideMatchBetAmount(parseMoney(val).toString())}
                       />
                     </View>
                   </View>
@@ -1787,9 +1786,9 @@ export default function SessionScreen() {
                                   if (customBet !== undefined && customBet !== null) {
                                     if (typeof customBet === 'object') {
                                       const oppName = players[customBet.targetPlayerId]?.name || 'Đối thủ';
-                                      return `${pName} (Cược riêng: ${(customBet.amount / 1000)}k ➔ ${oppName})`;
+                                      return `${pName} (Cược riêng: ${formatMoney(customBet.amount)}đ ➔ ${oppName})`;
                                     } else {
-                                      return `${pName} (Cược riêng: ${(customBet / 1000)}k)`;
+                                      return `${pName} (Cược riêng: ${formatMoney(customBet)}đ)`;
                                     }
                                   }
                                   return pName;
@@ -1804,21 +1803,47 @@ export default function SessionScreen() {
                     })}
                   </View>
 
-                  {isHost && session.meta?.status !== 'finished' && (
-                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 15, marginBottom: 10 }}>
-                      <TouchableOpacity
-                        style={[styles.actionBtn, { backgroundColor: '#ea4335', flex: 1 }]}
-                        onPress={async () => {
-                          const undoFn = historyModalData.type === 'side_set' ? undoSideSet : undoSet;
-                          await undoFn(pin, historyModalData.setId);
-                          setHistoryModalData(null);
-                          showAlert("Thành công", "Đã hoàn tác set đấu!");
-                        }}
-                      >
-                        <Text style={styles.btnText}>Hoàn tác Set đấu này</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
+                  {isHost && session.meta?.status !== 'finished' && (() => {
+                    const [tL, tR] = historyModalData.type === 'side_set'
+                      ? ['teamA', 'teamB']
+                      : normalizeMatchup(historyModalData.setData?.matchup);
+                    const currentWinner = historyModalData.setData?.winner;
+                    const targetWinner = currentWinner === tL ? tR : tL;
+                    const targetWinnerName = getTeamLabel(targetWinner);
+
+                    return (
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 15, marginBottom: 10 }}>
+                        <TouchableOpacity
+                          style={[styles.actionBtn, { backgroundColor: '#1a73e8', flex: 1 }]}
+                          onPress={() => {
+                            showAlert("Xác nhận đổi kết quả", `Đổi kết quả Set này thành ${targetWinnerName} thắng?`, [
+                              { text: "Hủy" },
+                              {
+                                text: "Đồng ý",
+                                onPress: async () => {
+                                  const updateFn = historyModalData.type === 'side_set' ? updateSideSetWinner : updateSetWinner;
+                                  const ok = await updateFn(pin, historyModalData.setId, targetWinner);
+                                  if (ok) {
+                                    setHistoryModalData(prev => ({
+                                      ...prev,
+                                      setData: {
+                                        ...prev.setData,
+                                        winner: targetWinner,
+                                        isEdited: targetWinner !== (prev.setData.originalWinner || currentWinner)
+                                      }
+                                    }));
+                                    showAlert("Thành công", `Đã đổi kết quả thành ${targetWinnerName} thắng!`);
+                                  }
+                                }
+                              }
+                            ]);
+                          }}
+                        >
+                          <Text style={styles.btnText}>Chỉnh sửa: Đổi sang {targetWinnerName} thắng</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })()}
                 </View>
 
                 <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setHistoryModalData(null)}>
@@ -1853,8 +1878,8 @@ export default function SessionScreen() {
                         style={[styles.addPlayerInput, { width: '100%', marginBottom: 15, paddingVertical: 10 }]}
                         keyboardType="numeric"
                         placeholder="Mức cược riêng (đ)..."
-                        value={customBetModalData.customAmount}
-                        onChangeText={(val) => setCustomBetModalData(prev => ({ ...prev, customAmount: val }))}
+                        value={formatMoney(customBetModalData.customAmount)}
+                        onChangeText={(val) => setCustomBetModalData(prev => ({ ...prev, customAmount: parseMoney(val).toString() }))}
                         autoFocus
                       />
 
@@ -1863,6 +1888,15 @@ export default function SessionScreen() {
                       </Text>
                       
                       {(() => {
+                        const teamSize = getPlayerTeamSize(customBetModalData.playerId);
+                        if (teamSize <= 1) {
+                          return (
+                            <Text style={{ fontSize: 12, color: '#666', fontStyle: 'italic', marginBottom: 15 }}>
+                              Đội chỉ có 1 người: mức cược sẽ áp dụng cho cả đội đối thủ (Pool).
+                            </Text>
+                          );
+                        }
+
                         const opponents = getOpponentsForPlayer(customBetModalData.playerId);
                         if (opponents.length === 0) {
                           return (
@@ -2057,7 +2091,7 @@ export default function SessionScreen() {
                 <TextInput 
                   style={styles.betInput} 
                   keyboardType="numeric" 
-                  value={betAmount} 
+                  value={formatMoney(betAmount)} 
                   onChangeText={handleBetAmountChange} 
                 />
                 <Text style={{color:'#666'}}>đ</Text>
@@ -2070,14 +2104,18 @@ export default function SessionScreen() {
                 <>
                   {(() => {
                     const [l, r] = normalizeMatchup(latestSet.matchup);
-                    const leftColor = l === 'teamA' ? '#1a73e8' : (l === 'teamB' ? '#ea4335' : (l === 'teamC' ? '#34a853' : '#673ab7'));
-                    const rightColor = r === 'teamA' ? '#1a73e8' : (r === 'teamB' ? '#ea4335' : (r === 'teamC' ? '#34a853' : '#673ab7'));
+                    const getBtnStyle = (tKey) => {
+                      if (tKey === 'teamA') return styles.actionBtnBlue;
+                      if (tKey === 'teamB') return styles.actionBtnRed;
+                      if (tKey === 'teamC') return styles.actionBtnGreen;
+                      return styles.actionBtnPurple;
+                    };
                     return (
                       <>
-                        <TouchableOpacity style={[styles.actionBtn, {backgroundColor: leftColor}]} onPress={() => handleFinishSet(l)}>
+                        <TouchableOpacity style={[styles.actionBtn, getBtnStyle(l)]} onPress={() => handleFinishSet(l)}>
                           <Text style={styles.btnText}>{getTeamLabel(l).replace('Team ', '')} Thắng</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={[styles.actionBtn, {backgroundColor: rightColor}]} onPress={() => handleFinishSet(r)}>
+                        <TouchableOpacity style={[styles.actionBtn, getBtnStyle(r)]} onPress={() => handleFinishSet(r)}>
                           <Text style={styles.btnText}>{getTeamLabel(r).replace('Team ', '')} Thắng</Text>
                         </TouchableOpacity>
                       </>
@@ -2086,8 +2124,8 @@ export default function SessionScreen() {
                 </>
               ) : (
                 <>
-                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#1a73e8'}]} onPress={handleStartSet}><Text style={styles.btnText}>Set tiếp</Text></TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#f9ab00'}]} onPress={() => undoSet(pin, latestSetId)}><Text style={styles.btnText}>Hoàn tác</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.actionBtn, styles.actionBtnGreen]} onPress={handleStartSet}><Text style={styles.btnText}>Set tiếp</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.actionBtn, styles.actionBtnYellow]} onPress={() => undoSet(pin, latestSetId)}><Text style={styles.btnText}>Hoàn tác</Text></TouchableOpacity>
                 </>
               )}
             </>
@@ -2097,28 +2135,28 @@ export default function SessionScreen() {
                 <TextInput 
                   style={styles.betInput} 
                   keyboardType="numeric" 
-                  value={sideBetAmountInput} 
+                  value={formatMoney(sideBetAmountInput)} 
                   onChangeText={handleSideBetAmountChange} 
                 />
-                <Text style={{color:'#666'}}>đ</Text>
+                <Text style={{color: DuoTheme.colors.grayDark, fontWeight: '700'}}>đ</Text>
               </View>
               {!latestSideSet ? (
-                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#1a73e8'}]} onPress={handleStartSideSet}>
+                <TouchableOpacity style={[styles.actionBtn, styles.actionBtnGreen]} onPress={handleStartSideSet}>
                   <Text style={styles.btnText}>Bắt đầu</Text>
                 </TouchableOpacity>
               ) : latestSideSet?.status === 'playing' ? (
                 <>
-                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#1a73e8'}]} onPress={() => handleFinishSideSet('teamA')}>
+                  <TouchableOpacity style={[styles.actionBtn, styles.actionBtnBlue]} onPress={() => handleFinishSideSet('teamA')}>
                     <Text style={styles.btnText}>A Thắng</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#ea4335'}]} onPress={() => handleFinishSideSet('teamB')}>
+                  <TouchableOpacity style={[styles.actionBtn, styles.actionBtnRed]} onPress={() => handleFinishSideSet('teamB')}>
                     <Text style={styles.btnText}>B Thắng</Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#1a73e8'}]} onPress={handleStartSideSet}><Text style={styles.btnText}>Set tiếp</Text></TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#f9ab00'}]} onPress={() => undoSideSet(pin, latestSideSetId)}><Text style={styles.btnText}>Hoàn tác</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.actionBtn, styles.actionBtnGreen]} onPress={handleStartSideSet}><Text style={styles.btnText}>Set tiếp</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.actionBtn, styles.actionBtnYellow]} onPress={() => undoSideSet(pin, latestSideSetId)}><Text style={styles.btnText}>Hoàn tác</Text></TouchableOpacity>
                 </>
               )}
             </>
@@ -2129,35 +2167,53 @@ export default function SessionScreen() {
   );
 }
 
-
-
 const TeamColumn = ({ title, color, slots, players, isHost, isPlaying, subTarget, onSelectSlot, onRemovePlayer, playerBets, onEditPlayerBet, isResting, onDeleteTeam, canDelete }) => {
   const teamKey = 'team' + title.replace('Team ', '');
+  const themeStyles = DuoTheme.colors[teamKey] || (isResting ? DuoTheme.colors.teamResting : DuoTheme.colors.teamC);
+
   return (
-    <View style={[styles.teamCol, { backgroundColor: color, opacity: isResting ? 0.4 : 1 }]}>
+    <View style={[
+      styles.teamCol, 
+      { 
+        backgroundColor: isResting ? '#F8FAFC' : themeStyles.bg,
+        borderColor: isResting ? '#E2E8F0' : themeStyles.border,
+        opacity: isResting ? 0.6 : 1 
+      }
+    ]}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 2 }}>
-        <Text style={[styles.teamTitle, { marginBottom: 0, flex: 1, textAlign: 'left' }]} numberOfLines={1}>
-          {title} {isResting ? '(Nghỉ)' : ''}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+          <Ionicons name="shirt" size={15} color={isResting ? '#64748B' : themeStyles.primary} />
+          <Text style={[styles.teamTitle, { color: isResting ? '#64748B' : themeStyles.text, marginBottom: 0, textAlign: 'left' }]} numberOfLines={1}>
+            {title} {isResting ? '(Nghỉ)' : ''}
+          </Text>
+        </View>
         {canDelete && (
           <TouchableOpacity onPress={() => onDeleteTeam(teamKey)} style={{ padding: 2 }}>
-            <Ionicons name="trash-outline" size={14} color="#d93025" />
+            <Ionicons name="trash-outline" size={15} color={DuoTheme.colors.red} />
           </TouchableOpacity>
         )}
       </View>
       {Object.entries(slots).map(([slotId, pids]) => {
         const isSubTarget = subTarget && subTarget.team === teamKey && subTarget.slotId === slotId;
         return (
-          <TouchableOpacity key={slotId} style={[styles.slotBox, isSubTarget && { backgroundColor: '#ffe0b2', borderColor: '#ff9800' }]} disabled={!isHost || !isPlaying || isResting} onPress={() => onSelectSlot(slotId)}>
+          <TouchableOpacity 
+            key={slotId} 
+            style={[
+              styles.slotBox, 
+              isSubTarget && { backgroundColor: DuoTheme.colors.yellowLight, borderColor: DuoTheme.colors.yellow, borderWidth: 2 }
+            ]} 
+            disabled={!isHost || !isPlaying || isResting} 
+            onPress={() => onSelectSlot(slotId)}
+          >
             {pids.map(pid => {
               const customBetVal = playerBets && playerBets[pid];
               let displayBet = '';
               if (customBetVal !== undefined && customBetVal !== null) {
                 if (typeof customBetVal === 'object') {
                   const oppName = players[customBetVal.targetPlayerId]?.name || 'Đối thủ';
-                  displayBet = `(${(customBetVal.amount / 1000)}k ➔ ${oppName})`;
+                  displayBet = `(${formatMoney(customBetVal.amount)}đ ➔ ${oppName})`;
                 } else {
-                  displayBet = `(${(customBetVal / 1000)}k)`;
+                  displayBet = `(${formatMoney(customBetVal)}đ)`;
                 }
               }
               return (
@@ -2167,6 +2223,11 @@ const TeamColumn = ({ title, color, slots, players, isHost, isPlaying, subTarget
                     disabled={!isHost || !isPlaying || isResting}
                     onPress={() => onEditPlayerBet(pid)}
                   >
+                    <View style={[styles.playerAvatarSmall, { backgroundColor: isResting ? '#E2E8F0' : themeStyles.badge }]}>
+                      <Text style={[styles.playerAvatarSmallText, { color: isResting ? '#64748B' : themeStyles.primary }]}>
+                        {(players[pid]?.name || 'P').charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
                     <Text style={styles.playerBadgeText} numberOfLines={1}>{players[pid]?.name}</Text>
                     {displayBet !== '' && (
                       <Text style={styles.customBetText}>
@@ -2176,7 +2237,7 @@ const TeamColumn = ({ title, color, slots, players, isHost, isPlaying, subTarget
                   </TouchableOpacity>
                   {isHost && isPlaying && !isResting && (
                     <TouchableOpacity onPress={() => onRemovePlayer(pid)} style={styles.removePlayerBtn}>
-                      <Ionicons name="close-circle" size={14} color="#d93025" />
+                      <Ionicons name="close-circle" size={16} color={DuoTheme.colors.red} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -2185,152 +2246,619 @@ const TeamColumn = ({ title, color, slots, players, isHost, isPlaying, subTarget
           </TouchableOpacity>
         );
       })}
-      {Object.keys(slots).length === 0 && <Text style={{color:'#999', textAlign: 'center'}}>Trống</Text>}
+      {Object.keys(slots).length === 0 && <Text style={{color: '#94A3B8', fontSize: 12, fontWeight: '500', textAlign: 'center', marginVertical: 10}}>+ Trống</Text>}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  center: { alignItems: 'center', padding: 20 },
-  header: { padding: 15, backgroundColor: '#1a73e8', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  pinText: { color: '#fff', fontWeight: 'bold', fontSize: 16 }, roleText: { color: '#fff' },
-  subBanner: { backgroundColor: '#ff9800', padding: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  subBannerText: { color: '#fff', fontSize: 12, flex: 1 },
-  body: { flex: 1, padding: 10 },
-  teamsContainer: { flexDirection: 'row', marginBottom: 20 },
-  teamCol: { flex: 1, marginHorizontal: 3, borderRadius: 10, padding: 6, minHeight: 150 },
-  teamTitle: { fontWeight: 'bold', fontSize: 13, marginBottom: 8, textAlign: 'center' },
-  slotBox: { backgroundColor: 'rgba(255,255,255,0.8)', padding: 4, borderRadius: 5, marginBottom: 5, borderWidth: 1, borderStyle: 'dashed', borderColor: '#ccc' },
-  playerBadgeContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 2, paddingHorizontal: 2 },
-  playerBadge: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 2 },
-  playerBadgeText: { fontSize: 12, color: '#333', flexShrink: 1 },
-  customBetText: { fontSize: 10, color: '#ff9800', fontWeight: 'bold', marginLeft: 2 },
-  removePlayerBtn: { padding: 2, marginLeft: 2 },
-  waitingContainer: { marginBottom: 20, backgroundColor: '#f0f4f8', padding: 10, borderRadius: 10 },
-  sectionTitle: { fontWeight: 'bold', marginBottom: 8 },
+  container: { flex: 1, backgroundColor: DuoTheme.colors.background },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: DuoTheme.colors.background },
+
+  /* Header */
+  header: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: DuoTheme.colors.border,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: DuoTheme.colors.grayDark,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: DuoTheme.colors.grayText,
+    marginTop: 1,
+  },
+  surplusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: DuoTheme.colors.greenLight,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: DuoTheme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  surplusChipText: {
+    color: DuoTheme.colors.greenDark,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  streakBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFEDD5',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: DuoTheme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  streakText: {
+    color: '#EA580C',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+
+  /* Banners */
+  subBanner: {
+    backgroundColor: '#EA580C',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  subBannerText: { color: '#FFF', fontSize: 13, fontWeight: '700', flex: 1 },
+
+  body: { flex: 1, padding: 12 },
+
+  /* Teams Container */
+  teamsContainer: { flexDirection: 'row', marginBottom: 16 },
+  teamCol: {
+    flex: 1,
+    marginHorizontal: 4,
+    borderRadius: DuoTheme.borderRadius.md,
+    padding: 10,
+    minHeight: 160,
+    borderWidth: 1.5,
+  },
+  teamTitle: { fontWeight: '800', fontSize: 13.5, marginBottom: 0 },
+  slotBox: {
+    backgroundColor: '#FFFFFF',
+    padding: 8,
+    borderRadius: DuoTheme.borderRadius.sm,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    ...DuoTheme.shadows.card,
+  },
+  playerBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+  },
+  playerBadge: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  playerAvatarSmall: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  playerAvatarSmallText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  playerAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playerAvatarText: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  playerBadgeText: { fontSize: 13, color: DuoTheme.colors.grayDark, fontWeight: '600', flexShrink: 1 },
+  customBetText: { fontSize: 11, color: DuoTheme.colors.orangeDark, fontWeight: '700', marginLeft: 4 },
+  removePlayerBtn: { padding: 2, marginLeft: 4 },
+
+  /* Waiting Container */
+  waitingContainer: {
+    marginBottom: 16,
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    borderRadius: DuoTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    ...DuoTheme.shadows.card,
+  },
+  sectionTitle: {
+    fontWeight: '800',
+    fontSize: 15,
+    color: DuoTheme.colors.grayDark,
+    marginBottom: 8,
+  },
   addPlayerForm: { flexDirection: 'row', marginBottom: 10 },
-  addPlayerInput: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#fff', marginRight: 10 },
-  addBtn: { backgroundColor: '#1a73e8', width: 40, height: 40, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  addBtnText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
-  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: { backgroundColor: '#fff', padding: 8, borderRadius: 15, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#ddd' },
-  chipText: { fontSize: 13, color: '#333' },
-  selectedChip: { backgroundColor: '#e8f0fe', borderColor: '#1a73e8' },
-  teamPicker: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 4, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#d8e0ea' },
-  teamPickerTitle: { fontWeight: 'bold', marginRight: 4 },
-  teamPickerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  teamPickerBtnText: { color: '#fff', fontWeight: 'bold' },
+  addPlayerInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.borderDark,
+    borderRadius: DuoTheme.borderRadius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#F8FAFC',
+    marginRight: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    color: DuoTheme.colors.grayDark,
+  },
+  addBtn: {
+    backgroundColor: DuoTheme.colors.primary,
+    width: 42,
+    height: 42,
+    borderRadius: DuoTheme.borderRadius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...DuoTheme.shadows.button,
+  },
+  addBtnText: { color: '#FFF', fontSize: 20, fontWeight: '800' },
+  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: {
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: DuoTheme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+  },
+  chipText: { fontSize: 13, color: DuoTheme.colors.grayDark, fontWeight: '600' },
+  selectedChip: {
+    backgroundColor: DuoTheme.colors.primaryLight,
+    borderColor: DuoTheme.colors.primary,
+  },
+  teamPicker: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: DuoTheme.colors.border,
+  },
+  teamPickerTitle: { fontWeight: '700', color: DuoTheme.colors.grayDark, marginBottom: 8, fontSize: 13 },
+  teamPickerBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: DuoTheme.borderRadius.sm,
+  },
+  teamPickerBtnText: { color: '#FFF', fontWeight: '700', fontSize: 12.5 },
   teamPickerCancel: { paddingHorizontal: 12, paddingVertical: 8 },
-  teamPickerCancelText: { color: '#666', fontWeight: 'bold' },
-  historyContainer: { marginBottom: 20, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#eee' },
-  historyItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
-  historyText: { fontSize: 14, fontWeight: 'bold' }, historySub: { fontSize: 12, color: '#666' },
-  summaryContainer: { marginBottom: 20, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#eee' },
-  playerBalanceRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
-  playerName: { fontSize: 15 },
-  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', backgroundColor: '#fff', padding: 10, borderTopWidth: 1, borderColor: '#eee', alignItems: 'center' },
-  betInputContainer: { flexDirection: 'row', alignItems: 'center', marginRight: 10 },
-  betInput: { width: 60, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginRight: 5, textAlign: 'center' },
-  actionBtn: { flex: 1, marginHorizontal: 5, padding: 15, borderRadius: 10, alignItems: 'center' },
-  btnText: { color: '#fff', fontWeight: 'bold' },
-  settledRow: { opacity: 0.5, backgroundColor: '#f9f9f9' },
-  settledText: { fontStyle: 'italic', color: '#888' },
-  settleBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5 },
-  settleBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { backgroundColor: '#fff', width: '90%', borderRadius: 15, padding: 20 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 5 },
-  modalSubTitle: { fontSize: 13, color: '#666', textAlign: 'center', marginBottom: 20 },
-  modalTeamsContainer: { flexDirection: 'row', justifyContent: 'space-between' },
-  modalTeamCol: { flex: 1, marginHorizontal: 3, backgroundColor: '#f0f4f8', borderRadius: 10, padding: 6, borderWidth: 1, borderColor: 'transparent' },
-  modalTeamTitle: { fontWeight: 'bold', fontSize: 12, marginBottom: 10, textAlign: 'center', color: '#1a73e8' },
-  modalSlot: { backgroundColor: '#fff', padding: 6, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#eee' },
-  modalSlotText: { fontSize: 12, textAlign: 'center' },
-  subTag: { fontSize: 9, color: '#ff9800', textAlign: 'center', marginTop: 4, fontWeight: 'bold' },
-  modalCloseBtn: { marginTop: 20, backgroundColor: '#1a73e8', padding: 12, borderRadius: 10, alignItems: 'center' },
-  modalCloseText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  activeSetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 12, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#e0e0e0' },
-  activeSetTitle: { fontWeight: 'bold', color: '#333', fontSize: 15 },
-  activeSetBet: { fontWeight: 'bold', color: '#1a73e8', fontSize: 15 },
-  backBtn: { marginRight: 8, paddingVertical: 2, paddingHorizontal: 4 },
+  teamPickerCancelText: { color: DuoTheme.colors.grayText, fontWeight: '600' },
 
-  matchupSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0f4f8', padding: 8, borderRadius: 10, marginBottom: 15 },
-  matchupLabel: { fontWeight: 'bold', marginRight: 10, color: '#333' },
-  matchupText: { fontWeight: 'bold', color: '#1a73e8' },
-  
-  matchupSideBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', gap: 4 },
-  matchupSideText: { fontSize: 13, fontWeight: 'bold', color: '#1a73e8' },
-  vsText: { fontSize: 12, fontWeight: 'bold', color: '#666' },
-  addTeamBtn: { padding: 4, marginLeft: 5 },
+  /* History Container */
+  historyContainer: {
+    marginBottom: 16,
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    borderRadius: DuoTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    ...DuoTheme.shadows.card,
+  },
+  historyItem: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  historyText: { fontSize: 13.5, fontWeight: '700', color: DuoTheme.colors.grayDark },
+  historySub: { fontSize: 12, color: DuoTheme.colors.grayText, marginTop: 2 },
 
-  ledgerRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  ledgerText: { fontSize: 13, color: '#333' },
-  ledgerAmount: { fontWeight: 'bold', fontSize: 13 },
+  /* Summary & Settlement Container */
+  summaryContainer: {
+    marginBottom: 16,
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    borderRadius: DuoTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    ...DuoTheme.shadows.card,
+  },
+  progressContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: DuoTheme.borderRadius.sm,
+    padding: 10,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+  },
+  progressLabel: { fontSize: 12.5, fontWeight: '700', color: DuoTheme.colors.grayDark },
+  progressValue: { fontSize: 12.5, fontWeight: '800', color: DuoTheme.colors.green },
+  progressTrack: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 6,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: DuoTheme.colors.green,
+    borderRadius: 4,
+  },
+  playerBalanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  playerName: { fontSize: 14.5, fontWeight: '700', color: DuoTheme.colors.grayDark },
+  playerTapLedgerHint: { fontSize: 11, color: DuoTheme.colors.grayMuted, marginTop: 1 },
+  settledBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: DuoTheme.colors.greenLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  settledBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: DuoTheme.colors.greenDark,
+    marginLeft: 2,
+  },
+  settledRow: { opacity: 0.6 },
+  settledText: { color: DuoTheme.colors.grayText },
+  settleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: DuoTheme.borderRadius.full,
+    borderWidth: 1,
+  },
+  settleBtnDone: {
+    backgroundColor: DuoTheme.colors.greenLight,
+    borderColor: '#86EFAC',
+  },
+  settleBtnUndo: {
+    backgroundColor: '#F1F5F9',
+    borderColor: DuoTheme.colors.borderDark,
+  },
+  settleBtnText: { color: DuoTheme.colors.grayDark, fontWeight: '700', fontSize: 12 },
 
-  dropdownModalContent: { backgroundColor: '#fff', width: '80%', borderRadius: 15, padding: 20 },
-  dropdownModalTitle: { fontSize: 16, fontWeight: 'bold', textAlign: 'center', marginBottom: 5 },
-  dropdownModalSubtitle: { fontSize: 12, color: '#666', textAlign: 'center', marginBottom: 15 },
+  /* Footer & Action Buttons */
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    alignItems: 'center',
+    ...DuoTheme.shadows.card,
+  },
+  betInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.borderDark,
+    borderRadius: DuoTheme.borderRadius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 8,
+  },
+  betInput: {
+    width: 62,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    color: DuoTheme.colors.grayDark,
+  },
+  actionBtn: {
+    flex: 1,
+    marginHorizontal: 4,
+    height: 48,
+    borderRadius: DuoTheme.borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionBtnBlue: {
+    backgroundColor: DuoTheme.colors.blue,
+  },
+  actionBtnRed: {
+    backgroundColor: DuoTheme.colors.red,
+  },
+  actionBtnGreen: {
+    backgroundColor: DuoTheme.colors.green,
+  },
+  actionBtnYellow: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.borderDark,
+  },
+  actionBtnPurple: {
+    backgroundColor: DuoTheme.colors.purple,
+  },
+  btnText: { color: '#FFF', fontWeight: '800', fontSize: 14.5 },
+
+  /* Modals */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: DuoTheme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    padding: 22,
+    ...DuoTheme.shadows.card,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: DuoTheme.colors.grayDark, textAlign: 'center', marginBottom: 4 },
+  modalSubTitle: { fontSize: 13, color: DuoTheme.colors.grayText, textAlign: 'center', marginBottom: 16 },
+  modalTeamsContainer: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  modalTeamCol: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: DuoTheme.borderRadius.sm,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+  },
+  modalTeamTitle: { fontWeight: '800', fontSize: 13, marginBottom: 8, textAlign: 'center', color: DuoTheme.colors.primary },
+  modalSlot: {
+    backgroundColor: '#FFF',
+    padding: 6,
+    borderRadius: 6,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+  },
+  modalSlotText: { fontSize: 12, fontWeight: '600', textAlign: 'center', color: DuoTheme.colors.grayDark },
+  subTag: { fontSize: 10, color: DuoTheme.colors.orangeDark, textAlign: 'center', marginTop: 2, fontWeight: '700' },
+  modalCloseBtn: {
+    marginTop: 16,
+    backgroundColor: DuoTheme.colors.primary,
+    paddingVertical: 12,
+    borderRadius: DuoTheme.borderRadius.md,
+    alignItems: 'center',
+  },
+  modalCloseText: { color: '#FFF', fontWeight: '700', fontSize: 14.5 },
+
+  /* Set Header & Matchup */
+  activeSetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: DuoTheme.borderRadius.md,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  activeSetTitle: { fontWeight: '800', color: DuoTheme.colors.primaryDark, fontSize: 14 },
+  activeSetBet: { fontWeight: '700', color: DuoTheme.colors.primaryDark, fontSize: 13 },
+  matchupSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 10,
+    borderRadius: DuoTheme.borderRadius.md,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    ...DuoTheme.shadows.card,
+  },
+  matchupLabel: { fontWeight: '700', marginRight: 8, color: DuoTheme.colors.grayDark, fontSize: 13 },
+  matchupText: { fontWeight: '800', color: DuoTheme.colors.primary, fontSize: 14 },
+  matchupSideBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: DuoTheme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    gap: 4,
+  },
+  matchupSideText: { fontSize: 13, fontWeight: '700', color: DuoTheme.colors.primary },
+  vsText: { fontSize: 12, fontWeight: '800', color: DuoTheme.colors.grayMuted, marginHorizontal: 4 },
+  addTeamBtn: { padding: 4, marginLeft: 4 },
+
+  ledgerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  ledgerText: { fontSize: 13, color: DuoTheme.colors.grayDark, fontWeight: '600' },
+  ledgerAmount: { fontWeight: '800', fontSize: 13.5 },
+
+  dropdownModalContent: {
+    backgroundColor: '#FFF',
+    width: '85%',
+    maxWidth: 380,
+    borderRadius: DuoTheme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    padding: 20,
+    ...DuoTheme.shadows.card,
+  },
+  dropdownModalTitle: { fontSize: 16, fontWeight: '800', textAlign: 'center', color: DuoTheme.colors.grayDark, marginBottom: 4 },
+  dropdownModalSubtitle: { fontSize: 12, color: DuoTheme.colors.grayText, textAlign: 'center', marginBottom: 14 },
   dropdownList: { gap: 8 },
-  dropdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#eee', backgroundColor: '#f9f9f9' },
-  dropdownItemActive: { borderColor: '#1a73e8', backgroundColor: '#e8f0fe' },
-  dropdownItemText: { fontSize: 14, color: '#333', fontWeight: '500' },
-  dropdownItemTextActive: { color: '#1a73e8', fontWeight: 'bold' },
+  dropdownItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: DuoTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    backgroundColor: '#F8FAFC',
+  },
+  dropdownItemActive: {
+    borderColor: DuoTheme.colors.primary,
+    backgroundColor: DuoTheme.colors.primaryLight,
+  },
+  dropdownItemText: { fontSize: 14, color: DuoTheme.colors.grayDark, fontWeight: '600' },
+  dropdownItemTextActive: { color: DuoTheme.colors.primary, fontWeight: '800' },
 
-  // New styling rules
-  checkoutBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#e6f4ea', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#34a853' },
-  checkoutTitle: { fontSize: 15, fontWeight: 'bold', color: '#137333' },
-  checkoutSub: { fontSize: 12, color: '#137333', marginTop: 2 },
+  checkoutBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: DuoTheme.colors.greenLight,
+    padding: 12,
+    borderRadius: DuoTheme.borderRadius.md,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  checkoutTitle: { fontSize: 15, fontWeight: '800', color: DuoTheme.colors.greenDark },
+  checkoutSub: { fontSize: 12.5, color: DuoTheme.colors.grayDark, marginTop: 2, fontWeight: '500' },
 
-  warningCard: { backgroundColor: '#fce8e6', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#ea4335' },
-  warningTitle: { fontSize: 14, fontWeight: 'bold', color: '#c5221f' },
-  warningText: { fontSize: 12, color: '#601111', marginVertical: 4 },
-  warningDetails: { flexDirection: 'row', gap: 10, marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#f1bebe' },
-  warningCol: { flex: 1 },
-  warningColHeader: { fontWeight: 'bold', fontSize: 12, color: '#333', marginBottom: 4 },
-  warningPayoutText: { fontSize: 11, color: '#555' },
+  warningCard: {
+    backgroundColor: '#FFFBEB',
+    padding: 14,
+    borderRadius: DuoTheme.borderRadius.md,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderLeftWidth: 4,
+    borderLeftColor: '#F59E0B',
+  },
+  warningTitle: { fontSize: 13.5, fontWeight: '800', color: '#B45309' },
+  warningText: { fontSize: 12.5, color: '#78350F', marginVertical: 4, lineHeight: 18 },
+  warningDetails: { flexDirection: 'row', gap: 10, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#FDE68A' },
+  warningCol: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#FEF3C7' },
+  warningColHeader: { fontWeight: '700', fontSize: 12, color: DuoTheme.colors.grayDark, marginBottom: 4 },
+  warningPayoutText: { fontSize: 11.5, color: DuoTheme.colors.grayText, fontWeight: '600' },
 
-  sideBetsContainer: { backgroundColor: '#f8f9fa', padding: 12, borderRadius: 10, marginBottom: 15, borderWidth: 1, borderColor: '#e0e0e0' },
+  sideBetsContainer: {
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    borderRadius: DuoTheme.borderRadius.md,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    ...DuoTheme.shadows.card,
+  },
   collapsibleHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  addSideBetBtn: { backgroundColor: '#1a73e8', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginVertical: 8 },
-  addSideBetBtnText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  sideBetItem: { backgroundColor: '#fff', padding: 10, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#eee', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  completedSideBet: { opacity: 0.8, backgroundColor: '#f1f3f4' },
-  sideBetName: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  sideBetAmountText: { fontSize: 12, fontWeight: 'bold', color: '#202124', marginVertical: 2 },
-  sideBetSides: { fontSize: 12, color: '#666', lineHeight: 16 },
-  sideBetWinnerTag: { fontSize: 12, fontWeight: 'bold', color: '#137333', marginTop: 4 },
-  sideBetActions: { flexDirection: 'row', gap: 4, alignItems: 'center' },
-  sbSettleBtn: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
-  sbDeleteBtn: { padding: 6, borderRadius: 6, borderWidth: 1, borderColor: '#f1bebe', justifyContent: 'center', alignItems: 'center' },
-  sbActionText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
+  addSideBetBtn: {
+    backgroundColor: DuoTheme.colors.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: DuoTheme.borderRadius.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginVertical: 8,
+  },
+  addSideBetBtnText: { color: '#FFF', fontSize: 12.5, fontWeight: '700' },
+  sideBetItem: {
+    backgroundColor: '#F8FAFC',
+    padding: 10,
+    borderRadius: DuoTheme.borderRadius.sm,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  completedSideBet: { opacity: 0.8, backgroundColor: '#F1F5F9' },
+  sideBetName: { fontSize: 13.5, fontWeight: '700', color: DuoTheme.colors.grayDark },
+  sideBetAmountText: { fontSize: 12, fontWeight: '700', color: DuoTheme.colors.grayDark, marginVertical: 2 },
+  sideBetSides: { fontSize: 11.5, color: DuoTheme.colors.grayText, lineHeight: 16 },
+  sideBetWinnerTag: { fontSize: 12, fontWeight: '700', color: DuoTheme.colors.green, marginTop: 3 },
+  sideBetActions: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  sbSettleBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: DuoTheme.borderRadius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sbDeleteBtn: {
+    padding: 6,
+    borderRadius: DuoTheme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+  },
+  sbActionText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
 
-  finishSessionBtn: { backgroundColor: '#ea4335', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 },
-  finishSessionBtnText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  playerBreakdownText: { fontSize: 11, color: '#666', marginTop: 2 },
+  finishSessionBtn: {
+    backgroundColor: DuoTheme.colors.redLight,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: DuoTheme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+  },
+  finishSessionBtnText: { color: DuoTheme.colors.red, fontSize: 12, fontWeight: '700' },
+  playerBreakdownText: { fontSize: 11, color: DuoTheme.colors.grayText, marginTop: 2 },
 
   dropdownContainer: {
-    backgroundColor: '#f1f3f4',
-    borderRadius: 8,
-    padding: 4,
-    marginBottom: 15
+    backgroundColor: '#FFFFFF',
+    borderRadius: DuoTheme.borderRadius.md,
+    padding: 2,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    ...DuoTheme.shadows.card,
   },
   dropdownButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#FFF',
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2
+    borderRadius: DuoTheme.borderRadius.md,
   },
   dropdownButtonText: {
     fontSize: 14,
-    fontWeight: 'bold',
-    color: '#1a73e8'
+    fontWeight: '700',
+    color: DuoTheme.colors.primary,
   },
 });
