@@ -44,6 +44,7 @@ app-example
 /android
 
 # AI & Tool Scratches
+*.apk
 .agents/
 .claude/
 .cursor/
