@@ -131,3 +131,14 @@ Các case tính tiền có mã `ENG-xx` được khóa tự động bởi `npm t
 | UI-02 [Smoke] | Gõ `200000` vào ô tổng tiền sân | Ô input tự động hiển thị `200.000` | |
 | UI-03 | Gõ `10000` vào ô cược riêng cá nhân | Ô input tự động hiển thị `10.000` | |
 | UI-04 | Quan sát badge cược riêng trên cột đội | Hiển thị dạng `(10.000đ)` thay vì `10k` | |
+
+---
+
+## 12. Cài Đặt PWA & Chạy Offline Từ Lối Tắt Trình Duyệt
+
+| ID | Bước thực hiện | Kết quả kỳ vọng | Kết quả |
+|---|---|---|---|
+| PWA-01 [Smoke] | Chạy `npm run build:web && node scripts/check-pwa-build.mjs` | Build ra `dist/` kèm `manifest.json`, icon 192/512/180, và `sw.js` precache đủ HTML/JS/CSS/Ionicons.ttf | |
+| PWA-02 [Smoke] | Mở web qua HTTPS/localhost trên Chrome (Android/Desktop) hoặc Safari (iOS) | Bấm nút **Cài đặt ứng dụng để dùng offline** (hoặc Share ➔ Thêm vào MH chính) tạo được lối tắt standalone | |
+| PWA-03 [Smoke] | Bật chế độ Offline (tắt Wifi/4G), mở ứng dụng từ lối tắt, tạo phiên `/session?pin=...` và reload trang | Trang Home và `/session` vẫn load tức thì, hiển thị đủ icon `Ionicons`, dữ liệu `localStorage` giữ nguyên | |
+| PWA-04 | Deploy bản build mới (đổi `CACHE_NAME`), mở lại app khi có mạng | Service Worker tự tải cache mới (`skipWaiting`) và xóa cache cũ (`activate`) | |

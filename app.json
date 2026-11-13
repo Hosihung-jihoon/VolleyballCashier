@@ -23,7 +23,11 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Sổ Kèo Bóng Chuyền",
+      "shortName": "Sổ Kèo BC",
+      "themeColor": "#2563EB",
+      "backgroundColor": "#F8FAFC"
     },
     "plugins": [
       "expo-router",

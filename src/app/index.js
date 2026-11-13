@@ -46,6 +46,42 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [lastPin, setLastPin] = useState(null);
+  const [installPromptEvent, setInstallPromptEvent] = useState(null);
+  const [installMode, setInstallMode] = useState(null); // 'prompt' | 'ios' | 'installed' | null
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const isStandalone =
+      window.matchMedia?.('(display-mode: standalone)')?.matches ||
+      window.navigator?.standalone === true;
+
+    if (isStandalone) {
+      setInstallMode('installed');
+      return;
+    }
+
+    const ua = window.navigator?.userAgent || '';
+    if (/iphone|ipad|ipod/i.test(ua)) {
+      setInstallMode('ios');
+    }
+
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setInstallPromptEvent(e);
+      setInstallMode('prompt');
+    };
+    const handleAppInstalled = () => {
+      setInstallPromptEvent(null);
+      setInstallMode('installed');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     const checkLastSession = async () => {
@@ -102,6 +138,24 @@ export default function HomeScreen() {
       showAlert('Lỗi', e.message);
     }
     setLoading(false);
+  };
+
+  const handleInstallPwa = async () => {
+    if (installMode === 'prompt' && installPromptEvent) {
+      installPromptEvent.prompt();
+      const choice = await installPromptEvent.userChoice.catch(() => null);
+      if (choice?.outcome === 'accepted') {
+        setInstallPromptEvent(null);
+        setInstallMode('installed');
+      }
+      return;
+    }
+    if (installMode === 'ios') {
+      showAlert(
+        'Cài đặt dùng Offline (iPhone / iPad)',
+        '1. Bấm nút Chia sẻ (Share) ở thanh trình duyệt Safari.\n2. Chọn "Thêm vào MH chính" (Add to Home Screen).\n3. Mở app từ màn hình chính để dùng bình thường kể cả khi mất mạng.'
+      );
+    }
   };
 
   return (
@@ -177,6 +231,17 @@ export default function HomeScreen() {
             <Ionicons name="help-circle-outline" size={18} color={DuoTheme.colors.grayText} />
             <Text style={styles.helpPillText}>Hướng dẫn luật chơi & tính năng</Text>
           </Pressable>
+
+          {Platform.OS === 'web' && (installMode === 'prompt' || installMode === 'ios') && (
+            <Pressable style={styles.installPill} onPress={handleInstallPwa}>
+              <Ionicons name="download-outline" size={18} color={DuoTheme.colors.primaryDark} />
+              <Text style={styles.installPillText}>
+                {installMode === 'prompt'
+                  ? 'Cài đặt ứng dụng để dùng offline'
+                  : 'Hướng dẫn tạo lối tắt dùng offline (iOS)'}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
 
@@ -392,6 +457,23 @@ const styles = StyleSheet.create({
     color: DuoTheme.colors.grayText,
     fontSize: 13,
     fontWeight: '600',
+    marginLeft: 6,
+  },
+  installPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    marginTop: 8,
+    borderRadius: DuoTheme.borderRadius.full,
+    backgroundColor: DuoTheme.colors.primaryLight,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  installPillText: {
+    color: DuoTheme.colors.primaryDark,
+    fontSize: 13,
+    fontWeight: '700',
     marginLeft: 6,
   },
 
