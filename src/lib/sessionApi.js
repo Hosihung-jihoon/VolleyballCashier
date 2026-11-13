@@ -40,7 +40,7 @@ export const createSession = async (hostName) => {
       hostName: hostName,
       createdAt: now,
       isOffline: true,
-      teams: ['teamA', 'teamB', 'teamC']
+      teams: ['teamA', 'teamB']
     },
     players: {},
     sets: {},
@@ -104,7 +104,7 @@ export const startNewSet = async (pin, betAmount, previousTeams = null) => {
   const setCount = session.sets ? Object.keys(session.sets).length : 0;
   const setId = `set_${setCount + 1}`;
 
-  const teamsList = session.meta?.teams || ['teamA', 'teamB', 'teamC'];
+  const teamsList = session.meta?.teams || ['teamA', 'teamB'];
   const teamsData = {};
   teamsList.forEach(t => {
     const letter = t.replace('team', '');
@@ -126,7 +126,7 @@ export const startNewSet = async (pin, betAmount, previousTeams = null) => {
     // legacy fields
     teamA: teamsData.teamA || { slots: {} },
     teamB: teamsData.teamB || { slots: {} },
-    teamC: teamsData.teamC || { slots: {} },
+    ...(teamsData.teamC ? { teamC: teamsData.teamC } : {}),
   };
   await saveSessionData(pin, session);
   return setId;
@@ -297,7 +297,7 @@ export const undoSet = async (pin, setId) => {
 export const addTeamToSession = async (pin, setId) => {
   const session = await getSessionData(pin);
   if (!session) return null;
-  if (!session.meta.teams) session.meta.teams = ['teamA', 'teamB', 'teamC'];
+  if (!session.meta.teams) session.meta.teams = ['teamA', 'teamB'];
   
   let nextLetter = 'A';
   for (let i = 0; i < 26; i++) {

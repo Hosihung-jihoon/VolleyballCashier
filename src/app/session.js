@@ -142,7 +142,7 @@ export default function SessionScreen() {
   const latestSet = (latestSetId && session.sets) ? session.sets[latestSetId] : null;
   const isHost = role === 'host';
 
-  const activeTeams = session.meta?.teams || ['teamA', 'teamB', 'teamC'];
+  const activeTeams = session.meta?.teams || ['teamA', 'teamB'];
 
   // Derived Side Match values
   const activeTab = selectedMatchId === 'main' ? 'main' : 'side';
@@ -236,9 +236,9 @@ export default function SessionScreen() {
     const defaultBet = setData.betAmount || 5000;
     const playerBets = setData.playerBets || {};
 
-    // Mô phỏng chính xác bằng calculateSettlement
-    const simLeft = calculateSettlement(teamsMap, setData.matchup, lKey, defaultBet, playerBets).balanceChanges;
-    const simRight = calculateSettlement(teamsMap, setData.matchup, rKey, defaultBet, playerBets).balanceChanges;
+    // Mô phỏng chính xác bằng calculateSettlement (deterministic cho preview)
+    const simLeft = calculateSettlement(teamsMap, setData.matchup, lKey, defaultBet, playerBets, () => 0).balanceChanges;
+    const simRight = calculateSettlement(teamsMap, setData.matchup, rKey, defaultBet, playerBets, () => 0).balanceChanges;
 
     const getExpectedWin = (pid) => {
       const raw = playerBets[pid];
@@ -323,8 +323,11 @@ export default function SessionScreen() {
     setNewPlayerName('');
   };
 
-  const handleAddToTeam = (pid, teamKey) => {
+  const handleAddToTeam = (pidOrPids, teamKey) => {
     if (!isHost) return;
+    const pids = (Array.isArray(pidOrPids) ? pidOrPids : [pidOrPids]).filter(Boolean);
+    if (pids.length === 0) return;
+
     const isSide = activeTab === 'side';
     const activeSetData = isSide ? latestSideSet : latestSet;
     const activeSetIdVal = isSide ? latestSideSetId : latestSetId;
@@ -332,19 +335,19 @@ export default function SessionScreen() {
 
     if (!activeSetData || activeSetData.status !== 'playing') return;
 
-    const teamsMap = { ...activeSetData.teams };
-    const teamA = activeSetData.teamA || { slots: {} };
-    const teamB = activeSetData.teamB || { slots: {} };
-    const teamC = activeSetData.teamC || { slots: {} };
-    if (!teamsMap.teamA) teamsMap.teamA = teamA;
-    if (!teamsMap.teamB) teamsMap.teamB = teamB;
-    if (!isSide && !teamsMap.teamC) teamsMap.teamC = teamC;
+    const teamsMap = { ...(activeSetData.teams || {}) };
+    const teamKeysToInit = isSide ? ['teamA', 'teamB'] : activeTeams;
+    teamKeysToInit.forEach(k => {
+      if (!teamsMap[k]) teamsMap[k] = activeSetData[k] || { slots: {} };
+    });
 
-    const targetTeam = { ...teamsMap[teamKey] } || { slots: {} };
-    const slots = { ...targetTeam.slots };
+    const targetTeam = { ...(teamsMap[teamKey] || { slots: {} }) };
+    const slots = { ...(targetTeam.slots || {}) };
     const existingNums = Object.keys(slots).map(k => parseInt(k.replace('slot_', '')) || 0);
-    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
-    slots[`slot_${nextNum}`] = [pid];
+    let nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+    pids.forEach(id => {
+      slots[`slot_${nextNum++}`] = [id];
+    });
     targetTeam.slots = slots;
     teamsMap[teamKey] = targetTeam;
 
@@ -365,13 +368,11 @@ export default function SessionScreen() {
 
     if (!activeSetData || activeSetData.status !== 'playing') return;
     
-    const teamsMap = { ...activeSetData.teams };
-    const teamA = activeSetData.teamA || { slots: {} };
-    const teamB = activeSetData.teamB || { slots: {} };
-    const teamC = activeSetData.teamC || { slots: {} };
-    if (!teamsMap.teamA) teamsMap.teamA = teamA;
-    if (!teamsMap.teamB) teamsMap.teamB = teamB;
-    if (!isSide && !teamsMap.teamC) teamsMap.teamC = teamC;
+    const teamsMap = { ...(activeSetData.teams || {}) };
+    const teamKeysToInit = isSide ? ['teamA', 'teamB'] : activeTeams;
+    teamKeysToInit.forEach(k => {
+      if (!teamsMap[k]) teamsMap[k] = activeSetData[k] || { slots: {} };
+    });
 
     const targetTeam = { ...teamsMap[teamKey] };
     if (!targetTeam) return;
@@ -411,13 +412,11 @@ export default function SessionScreen() {
     if (!targetSub || !activeSetData) return;
     const { team: teamKey, slotId } = targetSub;
     
-    const teamsMap = { ...activeSetData.teams };
-    const teamA = activeSetData.teamA || { slots: {} };
-    const teamB = activeSetData.teamB || { slots: {} };
-    const teamC = activeSetData.teamC || { slots: {} };
-    if (!teamsMap.teamA) teamsMap.teamA = teamA;
-    if (!teamsMap.teamB) teamsMap.teamB = teamB;
-    if (!isSide && !teamsMap.teamC) teamsMap.teamC = teamC;
+    const teamsMap = { ...(activeSetData.teams || {}) };
+    const teamKeysToInit = isSide ? ['teamA', 'teamB'] : activeTeams;
+    teamKeysToInit.forEach(k => {
+      if (!teamsMap[k]) teamsMap[k] = activeSetData[k] || { slots: {} };
+    });
 
     const targetTeam = { ...teamsMap[teamKey] };
     if (!targetTeam) return;
@@ -707,9 +706,9 @@ export default function SessionScreen() {
         });
 
         if (userTeamKey) {
-          const { balanceChanges } = calculateSettlement(
-            teamsMap, matchup, winner, betAmount, playerBets
-          );
+          const balanceChanges = s.balanceChanges || calculateSettlement(
+            teamsMap, matchup, winner, betAmount, playerBets, () => 0
+          ).balanceChanges;
           const change = balanceChanges[pid] || 0;
           const customBet = playerBets[pid];
 
@@ -756,9 +755,9 @@ export default function SessionScreen() {
         });
 
         if (userTeamKey) {
-          const { balanceChanges } = calculateSettlement(
-            teamsMap, matchup, winner, betAmount, playerBets
-          );
+          const balanceChanges = s.balanceChanges || calculateSettlement(
+            teamsMap, matchup, winner, betAmount, playerBets, () => 0
+          ).balanceChanges;
           const change = balanceChanges[pid] || 0;
           const customBet = playerBets[pid];
 
@@ -865,6 +864,7 @@ export default function SessionScreen() {
 
       <ScrollView 
         style={styles.body} 
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: (isHost && (activeTab === 'main' || activeTab === 'side' || session.meta?.status === 'finished')) ? 120 : 20 }}
       >
         {session.meta?.status === 'finished' && (
@@ -1053,6 +1053,34 @@ export default function SessionScreen() {
             ))}
             {getWaitingPlayers().length === 0 && <Text style={{color:'#999'}}>Tất cả đã lên sân!</Text>}
           </View>
+          {isHost && latestSet?.status === 'playing' && !subTarget && !teamPickerPlayerId && getWaitingPlayers().length > 0 && (
+            <View style={styles.teamPicker}>
+              <Text style={styles.teamPickerTitle}>Thêm tất cả ({getWaitingPlayers().length} người chờ) vào:</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginTop: 5 }}>
+                {activeTeams.map(tKey => {
+                  const [l, r] = normalizeMatchup(latestSet?.matchup);
+                  const isResting = tKey !== l && tKey !== r;
+                  const btnColors = {
+                    teamA: '#1a73e8',
+                    teamB: '#ea4335',
+                    teamC: '#34a853',
+                  };
+                  const btnBg = isResting ? '#70757a' : (btnColors[tKey] || '#673ab7');
+                  return (
+                    <TouchableOpacity
+                      key={tKey}
+                      style={[styles.teamPickerBtn, { backgroundColor: btnBg }]}
+                      onPress={() => handleAddToTeam(getWaitingPlayers(), tKey)}
+                    >
+                      <Text style={styles.teamPickerBtnText}>
+                        + {getTeamLabel(tKey)}{isResting ? ' (Nghỉ)' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
           {teamPickerPlayerId && players[teamPickerPlayerId] && (
             <View style={styles.teamPicker}>
               <Text style={styles.teamPickerTitle}>Thêm {players[teamPickerPlayerId]?.name} vào:</Text>
@@ -1199,6 +1227,30 @@ export default function SessionScreen() {
                 ))}
                 {getWaitingPlayersForSide().length === 0 && <Text style={{color:'#999'}}>Tất cả đã lên sân!</Text>}
               </View>
+              {isHost && latestSideSet?.status === 'playing' && !sideSubTarget && !sideTeamPickerPlayerId && getWaitingPlayersForSide().length > 0 && (
+                <View style={styles.teamPicker}>
+                  <Text style={styles.teamPickerTitle}>Thêm tất cả ({getWaitingPlayersForSide().length} người chờ) vào:</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginTop: 5 }}>
+                    {['teamA', 'teamB'].map(tKey => {
+                      const btnColors = {
+                        teamA: '#1a73e8',
+                        teamB: '#ea4335',
+                      };
+                      return (
+                        <TouchableOpacity
+                          key={tKey}
+                          style={[styles.teamPickerBtn, { backgroundColor: btnColors[tKey] }]}
+                          onPress={() => handleAddToTeam(getWaitingPlayersForSide(), tKey)}
+                        >
+                          <Text style={styles.teamPickerBtnText}>
+                            + {tKey === 'teamA' ? 'Team A' : 'Team B'}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
               {sideTeamPickerPlayerId && players[sideTeamPickerPlayerId] && (
                 <View style={styles.teamPicker}>
                   <Text style={styles.teamPickerTitle}>Thêm {players[sideTeamPickerPlayerId]?.name} vào:</Text>
@@ -1449,6 +1501,7 @@ export default function SessionScreen() {
           })}
           {Object.keys(players).length === 0 && <Text style={{color:'#999'}}>Chưa có người chơi...</Text>}
         </View>
+      </ScrollView>
 
         {/* Modal Kết thúc buổi chơi */}
         <Modal
@@ -1456,93 +1509,90 @@ export default function SessionScreen() {
           transparent={true}
           animationType="fade"
           onRequestClose={() => setFinishModalVisible(false)}
-          statusBarTranslucent={true}
         >
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalOverlay}
           >
-            <View style={styles.modalOverlay}>
-              <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, justifyContent: 'space-between' }}>
-                  <View>
-                    <Text style={styles.modalTitle}>Kết thúc buổi chơi</Text>
-                    <Text style={styles.modalSubTitle}>Nhập tổng tiền sân để tính toán chia phí cho các thành viên.</Text>
-                    
-                    <TextInput
-                      style={[styles.addPlayerInput, { width: '100%', marginBottom: 15, paddingVertical: 10 }]}
-                      keyboardType="numeric"
-                      placeholder="Tổng tiền sân (đ)..."
-                      value={formatMoney(courtFeeInput)}
-                      onChangeText={(val) => setCourtFeeInput(parseMoney(val).toString())}
-                      autoFocus
-                    />
+            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <View>
+                  <Text style={styles.modalTitle}>Kết thúc buổi chơi</Text>
+                  <Text style={styles.modalSubTitle}>Nhập tổng tiền sân để tính toán chia phí cho các thành viên.</Text>
+                  
+                  <TextInput
+                    style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, marginBottom: 15, paddingVertical: 10 }]}
+                    keyboardType="numeric"
+                    placeholder="Tổng tiền sân (đ)..."
+                    value={formatMoney(courtFeeInput)}
+                    onChangeText={(val) => setCourtFeeInput(parseMoney(val).toString())}
+                    autoFocus
+                  />
 
-                    <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
-                      Phương thức chia tiền sân:
-                    </Text>
-                    
-                    <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
-                      <TouchableOpacity
-                        style={{
-                          flex: 1,
-                          paddingVertical: 12,
-                          borderRadius: 8,
-                          borderWidth: 1,
-                          borderColor: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#ccc',
-                          backgroundColor: courtFeeSplitMethod === 'equal' ? '#e8f0fe' : '#fff',
-                          alignItems: 'center'
-                        }}
-                        onPress={() => setCourtFeeSplitMethod('equal')}
-                      >
-                        <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
-                          Chia đều
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={{
-                          flex: 1,
-                          paddingVertical: 12,
-                          borderRadius: 8,
-                          borderWidth: 1,
-                          borderColor: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#ccc',
-                          backgroundColor: courtFeeSplitMethod === 'proportional' ? '#e8f0fe' : '#fff',
-                          alignItems: 'center'
-                        }}
-                        onPress={() => setCourtFeeSplitMethod('proportional')}
-                      >
-                        <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
-                          Chia theo set đấu
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity 
-                      style={[styles.actionBtn, { backgroundColor: '#666' }]} 
-                      onPress={() => setFinishModalVisible(false)}
-                    >
-                      <Text style={styles.btnText}>Hủy</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={[styles.actionBtn, { backgroundColor: '#34a853' }]} 
-                      onPress={async () => {
-                        const fee = parseInt(courtFeeInput) || 0;
-                        if (fee <= 0) {
-                          showAlert("Lỗi", "Vui lòng nhập tiền sân hợp lệ!");
-                          return;
-                        }
-                        await finishSession(pin, fee, courtFeeSplitMethod);
-                        setFinishModalVisible(false);
-                        showAlert("Thành công", "Đã kết thúc buổi chơi và chia tiền sân!");
+                  <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
+                    Phương thức chia tiền sân:
+                  </Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        paddingVertical: 12,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#ccc',
+                        backgroundColor: courtFeeSplitMethod === 'equal' ? '#e8f0fe' : '#fff',
+                        alignItems: 'center'
                       }}
+                      onPress={() => setCourtFeeSplitMethod('equal')}
                     >
-                      <Text style={styles.btnText}>Xác nhận</Text>
+                      <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
+                        Chia đều
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        paddingVertical: 12,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#ccc',
+                        backgroundColor: courtFeeSplitMethod === 'proportional' ? '#e8f0fe' : '#fff',
+                        alignItems: 'center'
+                      }}
+                      onPress={() => setCourtFeeSplitMethod('proportional')}
+                    >
+                      <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
+                        Chia theo set đấu
+                      </Text>
                     </TouchableOpacity>
                   </View>
-                </ScrollView>
-              </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                  <TouchableOpacity 
+                    style={[styles.actionBtn, { backgroundColor: '#666' }]} 
+                    onPress={() => setFinishModalVisible(false)}
+                  >
+                    <Text style={styles.btnText}>Hủy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.actionBtn, { backgroundColor: '#34a853' }]} 
+                    onPress={async () => {
+                      const fee = parseInt(courtFeeInput) || 0;
+                      if (fee <= 0) {
+                        showAlert("Lỗi", "Vui lòng nhập tiền sân hợp lệ!");
+                        return;
+                      }
+                      await finishSession(pin, fee, courtFeeSplitMethod);
+                      setFinishModalVisible(false);
+                      showAlert("Thành công", "Đã kết thúc buổi chơi và chia tiền sân!");
+                    }}
+                  >
+                    <Text style={styles.btnText}>Xác nhận</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -1676,57 +1726,54 @@ export default function SessionScreen() {
           transparent={true}
           animationType="slide"
           onRequestClose={() => setAddSideMatchModalVisible(false)}
-          statusBarTranslucent={true}
         >
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalOverlay}
           >
-            <View style={styles.modalOverlay}>
-              <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, justifyContent: 'space-between' }}>
-                  <View>
-                    <Text style={styles.modalTitle}>Thêm kèo phụ mới</Text>
-                    <Text style={styles.modalSubTitle}>Tạo một kèo phụ tự lập mới chia sẻ thành viên và lịch sử</Text>
+            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <View>
+                  <Text style={styles.modalTitle}>Thêm kèo phụ mới</Text>
+                  <Text style={styles.modalSubTitle}>Tạo một kèo phụ tự lập mới chia sẻ thành viên và lịch sử</Text>
 
-                    <View style={{ marginBottom: 15 }}>
-                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Tên kèo phụ:</Text>
-                      <TextInput
-                        style={[styles.addPlayerInput, { width: '100%', paddingVertical: 8 }]}
-                        placeholder="VD: Kèo phụ Sân 2, Kèo bia..."
-                        value={newSideMatchName}
-                        onChangeText={setNewSideMatchName}
-                      />
-                    </View>
-
-                    <View style={{ marginBottom: 20 }}>
-                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Mức cược chung của set (đ):</Text>
-                      <TextInput
-                        style={[styles.addPlayerInput, { width: '100%', paddingVertical: 8 }]}
-                        keyboardType="numeric"
-                        placeholder="VD: 5.000"
-                        value={formatMoney(newSideMatchBetAmount)}
-                        onChangeText={(val) => setNewSideMatchBetAmount(parseMoney(val).toString())}
-                      />
-                    </View>
+                  <View style={{ marginBottom: 15 }}>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Tên kèo phụ:</Text>
+                    <TextInput
+                      style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, paddingVertical: 8 }]}
+                      placeholder="VD: Kèo phụ Sân 2, Kèo bia..."
+                      value={newSideMatchName}
+                      onChangeText={setNewSideMatchName}
+                    />
                   </View>
 
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity 
-                      style={[styles.actionBtn, { backgroundColor: '#666' }]} 
-                      onPress={() => setAddSideMatchModalVisible(false)}
-                    >
-                      <Text style={styles.btnText}>Hủy</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={[styles.actionBtn, { backgroundColor: '#1a73e8' }]} 
-                      onPress={handleCreateSideMatch}
-                    >
-                      <Text style={styles.btnText}>Tạo kèo</Text>
-                    </TouchableOpacity>
+                  <View style={{ marginBottom: 20 }}>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Mức cược chung của set (đ):</Text>
+                    <TextInput
+                      style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, paddingVertical: 8 }]}
+                      keyboardType="numeric"
+                      placeholder="VD: 5.000"
+                      value={formatMoney(newSideMatchBetAmount)}
+                      onChangeText={(val) => setNewSideMatchBetAmount(parseMoney(val).toString())}
+                    />
                   </View>
-                </ScrollView>
-              </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                  <TouchableOpacity 
+                    style={[styles.actionBtn, { backgroundColor: '#666' }]} 
+                    onPress={() => setAddSideMatchModalVisible(false)}
+                  >
+                    <Text style={styles.btnText}>Hủy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.actionBtn, { backgroundColor: '#1a73e8' }]} 
+                    onPress={handleCreateSideMatch}
+                  >
+                    <Text style={styles.btnText}>Tạo kèo</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -1860,109 +1907,107 @@ export default function SessionScreen() {
           transparent={true}
           animationType="fade"
           onRequestClose={() => setCustomBetModalData(null)}
-          statusBarTranslucent={true}
         >
           {customBetModalData && (
             <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              style={{ flex: 1 }}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.modalOverlay}
             >
-              <View style={styles.modalOverlay}>
-                <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-                  <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, justifyContent: 'space-between' }}>
-                    <View>
-                      <Text style={styles.modalTitle}>Cược riêng: {customBetModalData.playerName}</Text>
-                      <Text style={styles.modalSubTitle}>Đặt mức cược riêng cho thành viên này trong set hiện tại (bỏ trống để dùng mức cược chung của set).</Text>
-                      
-                      <TextInput
-                        style={[styles.addPlayerInput, { width: '100%', marginBottom: 15, paddingVertical: 10 }]}
-                        keyboardType="numeric"
-                        placeholder="Mức cược riêng (đ)..."
-                        value={formatMoney(customBetModalData.customAmount)}
-                        onChangeText={(val) => setCustomBetModalData(prev => ({ ...prev, customAmount: parseMoney(val).toString() }))}
-                        autoFocus
-                      />
+              <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+                <Text style={styles.modalTitle}>Cược riêng: {customBetModalData.playerName}</Text>
+                <Text style={styles.modalSubTitle}>Đặt mức cược riêng cho thành viên này trong set hiện tại (bỏ trống để dùng mức cược chung của set).</Text>
+                
+                <TextInput
+                  style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, marginBottom: 15, paddingVertical: 10 }]}
+                  keyboardType="numeric"
+                  placeholder="Mức cược riêng (đ)..."
+                  value={formatMoney(customBetModalData.customAmount)}
+                  onChangeText={(val) => setCustomBetModalData(prev => (prev ? { ...prev, customAmount: parseMoney(val).toString() } : null))}
+                />
 
-                      <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
-                        Đối thủ cược 1-on-1 (Không bắt buộc):
-                      </Text>
-                      
-                      {(() => {
-                        const teamSize = getPlayerTeamSize(customBetModalData.playerId);
-                        if (teamSize <= 1) {
-                          return (
-                            <Text style={{ fontSize: 12, color: '#666', fontStyle: 'italic', marginBottom: 15 }}>
-                              Đội chỉ có 1 người: mức cược sẽ áp dụng cho cả đội đối thủ (Pool).
-                            </Text>
-                          );
-                        }
+                <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
+                  Đối thủ cược 1-on-1 (Không bắt buộc):
+                </Text>
 
-                        const opponents = getOpponentsForPlayer(customBetModalData.playerId);
-                        if (opponents.length === 0) {
+                <ScrollView
+                  style={{ maxHeight: 180 }}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  {(() => {
+                    const teamSize = getPlayerTeamSize(customBetModalData.playerId);
+                    if (teamSize <= 1) {
+                      return (
+                        <Text style={{ fontSize: 12, color: '#666', fontStyle: 'italic', marginBottom: 15 }}>
+                          Đội chỉ có 1 người: mức cược sẽ áp dụng cho cả đội đối thủ (Pool).
+                        </Text>
+                      );
+                    }
+
+                    const opponents = getOpponentsForPlayer(customBetModalData.playerId);
+                    if (opponents.length === 0) {
+                      return (
+                        <Text style={{ fontSize: 12, color: '#999', marginBottom: 15, fontStyle: 'italic' }}>
+                          Không có đối thủ khả dụng (người chơi phải thuộc đội đang đấu).
+                        </Text>
+                      );
+                    }
+                    
+                    return (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 15 }}>
+                        <TouchableOpacity
+                          style={{
+                            paddingVertical: 6,
+                            paddingHorizontal: 12,
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: !customBetModalData.targetPlayerId ? '#34a853' : '#ccc',
+                            backgroundColor: !customBetModalData.targetPlayerId ? '#e6f4ea' : '#fff'
+                          }}
+                          onPress={() => setCustomBetModalData(prev => (prev ? { ...prev, targetPlayerId: '' } : null))}
+                        >
+                          <Text style={{ fontSize: 12, color: !customBetModalData.targetPlayerId ? '#34a853' : '#666', fontWeight: !customBetModalData.targetPlayerId ? 'bold' : 'normal' }}>
+                            Cả đội đối thủ (Pool)
+                          </Text>
+                        </TouchableOpacity>
+                        {opponents.map(opid => {
+                          const isSelected = customBetModalData.targetPlayerId === opid;
                           return (
-                            <Text style={{ fontSize: 12, color: '#999', marginBottom: 15, fontStyle: 'italic' }}>
-                              Không có đối thủ khả dụng (người chơi phải thuộc đội đang đấu).
-                            </Text>
-                          );
-                        }
-                        
-                        return (
-                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 15 }}>
                             <TouchableOpacity
+                              key={opid}
                               style={{
                                 paddingVertical: 6,
                                 paddingHorizontal: 12,
                                 borderRadius: 8,
                                 borderWidth: 1,
-                                borderColor: !customBetModalData.targetPlayerId ? '#34a853' : '#ccc',
-                                backgroundColor: !customBetModalData.targetPlayerId ? '#e6f4ea' : '#fff'
+                                borderColor: isSelected ? '#1a73e8' : '#ccc',
+                                backgroundColor: isSelected ? '#e8f0fe' : '#fff'
                               }}
-                              onPress={() => setCustomBetModalData(prev => ({ ...prev, targetPlayerId: '' }))}
+                              onPress={() => setCustomBetModalData(prev => (prev ? { ...prev, targetPlayerId: opid } : null))}
                             >
-                              <Text style={{ fontSize: 12, color: !customBetModalData.targetPlayerId ? '#34a853' : '#666', fontWeight: !customBetModalData.targetPlayerId ? 'bold' : 'normal' }}>
-                                Cả đội đối thủ (Pool)
+                              <Text style={{ fontSize: 12, color: isSelected ? '#1a73e8' : '#666', fontWeight: isSelected ? 'bold' : 'normal' }}>
+                                ➔ {players[opid]?.name || opid}
                               </Text>
                             </TouchableOpacity>
-                            {opponents.map(opid => {
-                              const isSelected = customBetModalData.targetPlayerId === opid;
-                              return (
-                                <TouchableOpacity
-                                  key={opid}
-                                  style={{
-                                    paddingVertical: 6,
-                                    paddingHorizontal: 12,
-                                    borderRadius: 8,
-                                    borderWidth: 1,
-                                    borderColor: isSelected ? '#1a73e8' : '#ccc',
-                                    backgroundColor: isSelected ? '#e8f0fe' : '#fff'
-                                  }}
-                                  onPress={() => setCustomBetModalData(prev => ({ ...prev, targetPlayerId: opid }))}
-                                >
-                                  <Text style={{ fontSize: 12, color: isSelected ? '#1a73e8' : '#666', fontWeight: isSelected ? 'bold' : 'normal' }}>
-                                    ➔ {players[opid]?.name || opid}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </View>
-                        );
-                      })()}
-                    </View>
-
-                    <View style={{ marginTop: 10 }}>
-                      <View style={{ flexDirection: 'row', gap: 10 }}>
-                        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#ea4335' }]} onPress={handleClearPlayerBet}>
-                          <Text style={styles.btnText}>Xóa cược riêng</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#34a853' }]} onPress={handleSavePlayerBet}>
-                          <Text style={styles.btnText}>Lưu</Text>
-                        </TouchableOpacity>
+                          );
+                        })}
                       </View>
-                      <TouchableOpacity style={[styles.modalCloseBtn, { backgroundColor: '#666', marginTop: 10 }]} onPress={() => setCustomBetModalData(null)}>
-                        <Text style={styles.modalCloseText}>Đóng</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </ScrollView>
+                    );
+                  })()}
+                </ScrollView>
+
+                <View style={{ marginTop: 10 }}>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#ea4335' }]} onPress={handleClearPlayerBet}>
+                      <Text style={styles.btnText}>Xóa cược riêng</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#34a853' }]} onPress={handleSavePlayerBet}>
+                      <Text style={styles.btnText}>Lưu</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity style={[styles.modalCloseBtn, { backgroundColor: '#666', marginTop: 10 }]} onPress={() => setCustomBetModalData(null)}>
+                    <Text style={styles.modalCloseText}>Đóng</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </KeyboardAvoidingView>
@@ -2071,7 +2116,6 @@ export default function SessionScreen() {
             </View>
           )}
         </Modal>
-      </ScrollView>
 
       {isHost && (activeTab === 'main' || activeTab === 'side' || session.meta?.status === 'finished') && (
         <View style={styles.footer}>

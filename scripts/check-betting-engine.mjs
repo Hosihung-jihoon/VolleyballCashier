@@ -7,7 +7,7 @@ const team = (...slots) => ({
 });
 const ids = (prefix, n) => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
 const run = (a, b, winner, bet = 5000, bets = {}) =>
-  calculateSettlement({ teamA: a, teamB: b }, 'teamA_teamB', winner, bet, bets);
+  calculateSettlement({ teamA: a, teamB: b }, 'teamA_teamB', winner, bet, bets, () => 0);
 const sum = (o) => Object.values(o).reduce((x, y) => x + y, 0);
 
 const cases = [
@@ -37,7 +37,7 @@ const cases = [
   ['ENG-13 cược riêng dạng chuỗi "8000"', run(team('a1', 'a2'), team('b1', 'b2'), 'teamA', 5000, { b1: '8000' }),
     { a1: 6000, a2: 7000, b1: -8000, b2: -5000 }],
   ['ENG-14 3 đội, A_C, C thắng, B nghỉ',
-    calculateSettlement({ teamA: team('a1'), teamB: team('b1'), teamC: team('c1', 'c2') }, 'teamA_teamC', 'teamC', 5000, {}),
+    calculateSettlement({ teamA: team('a1'), teamB: team('b1'), teamC: team('c1', 'c2') }, 'teamA_teamC', 'teamC', 5000, {}, () => 0),
     { a1: -5000, c1: 2000, c2: 3000 }],
   ['ENG-15 chữ ký cũ + matchup "A_B"', calculateSettlement(team('a1', 'a2'), team('b1', 'b2'), team('c1'), 'A_B', 'teamA', 5000),
     { a1: 5000, a2: 5000, b1: -5000, b2: -5000 }],
@@ -76,4 +76,39 @@ assert.equal(perPlayerShare, 12000, 'ENG-18: 200k / 17 mỗi người 12.000đ')
 assert.equal(totalCollected, 204000, 'ENG-18: Tổng thu 204.000đ');
 assert.equal(surplus, 4000, 'ENG-18: Thừa 4.000đ');
 
-console.log(`OK ${cases.length + 1} cases`);
+// ENG-23: Kiểm tra chia tiền ngẫu nhiên khi lực lượng chưa cân (3v2)
+{
+  const seenWinner3 = new Set();
+  const seenWinner2 = new Set();
+  for (let i = 0; i < 100; i++) {
+    const resA = calculateSettlement(
+      { teamA: team('a1', 'a2', 'a3'), teamB: team('b1', 'b2') },
+      'teamA_teamB',
+      'teamA',
+      5000,
+      {}
+    ).balanceChanges;
+    assert.equal(sum(resA), 0, 'ENG-23a: zero-sum');
+    const aVals = [resA.a1, resA.a2, resA.a3].sort((x, y) => x - y);
+    assert.deepEqual(aVals, [3000, 3000, 4000], 'ENG-23a: 2 người 3k, 1 người 4k');
+    const luckyA = ['a1', 'a2', 'a3'].find(k => resA[k] === 4000);
+    seenWinner3.add(luckyA);
+
+    const resB = calculateSettlement(
+      { teamA: team('a1', 'a2', 'a3'), teamB: team('b1', 'b2') },
+      'teamA_teamB',
+      'teamB',
+      5000,
+      {}
+    ).balanceChanges;
+    assert.equal(sum(resB), 0, 'ENG-23b: zero-sum');
+    const bVals = [resB.b1, resB.b2].sort((x, y) => x - y);
+    assert.deepEqual(bVals, [7000, 8000], 'ENG-23b: 1 người 7k, 1 người 8k');
+    const lowerB = ['b1', 'b2'].find(k => resB[k] === 7000);
+    seenWinner2.add(lowerB);
+  }
+  assert.equal(seenWinner3.size, 3, 'ENG-23a: cả 3 người đều có cơ hội nhận 4k');
+  assert.equal(seenWinner2.size, 2, 'ENG-23b: cả 2 người đều có cơ hội nhận 7k/8k');
+}
+
+console.log(`OK ${cases.length + 2} cases`);

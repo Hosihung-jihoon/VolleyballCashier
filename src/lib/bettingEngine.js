@@ -1,16 +1,16 @@
 // lib/bettingEngine.js
 export const calculateSettlement = (firstArg, ...args) => {
   let teamsMap = {};
-  let matchup, winner, betAmount, playerBets;
+  let matchup, winner, betAmount, playerBets, randomFn = Math.random;
 
   // Dynamically determine signature based on arguments
   if (firstArg && typeof firstArg === 'object' && !firstArg.slots) {
-    // New signature: calculateSettlement(teamsMap, matchup, winner, betAmount, playerBets)
+    // New signature: calculateSettlement(teamsMap, matchup, winner, betAmount, playerBets, randomFn)
     teamsMap = firstArg;
-    [matchup, winner, betAmount, playerBets = {}] = args;
+    [matchup, winner, betAmount, playerBets = {}, randomFn = Math.random] = args;
   } else {
-    // Old signature: calculateSettlement(teamA, teamB, teamC, matchup, winner, betAmount, playerBets)
-    const [teamB, teamC, matchupVal, winnerVal, betAmountVal, playerBetsVal = {}] = args;
+    // Old signature: calculateSettlement(teamA, teamB, teamC, matchup, winner, betAmount, playerBets, randomFn)
+    const [teamB, teamC, matchupVal, winnerVal, betAmountVal, playerBetsVal = {}, randomFnVal = Math.random] = args;
     teamsMap = {
       teamA: firstArg,
       teamB: teamB,
@@ -20,6 +20,7 @@ export const calculateSettlement = (firstArg, ...args) => {
     winner = winnerVal;
     betAmount = betAmountVal;
     playerBets = playerBetsVal;
+    randomFn = randomFnVal;
   }
 
   // Parse matchup dynamically
@@ -160,26 +161,32 @@ export const calculateSettlement = (firstArg, ...args) => {
     });
   });
 
-  // 4. Đảm bảo tổng số tiền thay đổi bằng 0 (Zero-sum) bằng cách bù trừ sai số làm tròn vào người thắng nhiều nhất
+  // 4. Đảm bảo tổng số tiền thay đổi bằng 0 (Zero-sum) bằng cách bù trừ sai số làm tròn ngẫu nhiên trong nhóm thắng cao nhất
   let sumChanges = 0;
   const poolKeys = Object.keys(balanceChanges).filter(pid => !hasDirectBet[pid]);
   poolKeys.forEach(k => { sumChanges += balanceChanges[k]; });
 
   if (sumChanges !== 0 && poolKeys.length > 0) {
-    let bestKey = null;
     let maxVal = -1;
+    const candidates = [];
     winningSlots.forEach(slot => {
       const activeSlotPids = slot.filter(pid => !hasDirectBet[pid]);
       activeSlotPids.forEach(pid => {
-        if (balanceChanges[pid] !== undefined && Math.abs(balanceChanges[pid]) > maxVal) {
-          maxVal = Math.abs(balanceChanges[pid]);
-          bestKey = pid;
+        if (balanceChanges[pid] !== undefined) {
+          const absVal = Math.abs(balanceChanges[pid]);
+          if (absVal > maxVal) {
+            maxVal = absVal;
+            candidates.length = 0;
+            candidates.push(pid);
+          } else if (absVal === maxVal) {
+            candidates.push(pid);
+          }
         }
       });
     });
-    if (!bestKey) {
-      bestKey = poolKeys[0];
-    }
+    const bestKey = candidates.length > 0
+      ? candidates[Math.floor(randomFn() * candidates.length)]
+      : poolKeys[Math.floor(randomFn() * poolKeys.length)];
     balanceChanges[bestKey] = balanceChanges[bestKey] - sumChanges;
   }
 
