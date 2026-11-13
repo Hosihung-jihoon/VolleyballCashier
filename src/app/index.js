@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import * as Updates from 'expo-updates';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -49,6 +50,7 @@ export default function HomeScreen() {
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [installMode, setInstallMode] = useState(null); // 'prompt' | 'ios' | 'installed' | null
   const [offlineStatus, setOfflineStatus] = useState(null); // 'checking' | 'ready' | 'unsupported' | null
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -200,6 +202,37 @@ export default function HomeScreen() {
     }
   };
 
+  const handleCheckOtaUpdate = async () => {
+    if (Platform.OS === 'web') return;
+    if (__DEV__ || !Updates.isEnabled) {
+      showAlert('Thông báo', 'OTA chỉ hoạt động trên bản APK/IPA đã build.');
+      return;
+    }
+    setCheckingUpdate(true);
+    try {
+      const res = await Updates.checkForUpdateAsync();
+      if (!res.isAvailable) {
+        showAlert(
+          'Đã là bản mới nhất',
+          `Runtime: ${Updates.runtimeVersion || '1.0.0'}\nUpdate: ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'embedded'}`
+        );
+      } else {
+        await Updates.fetchUpdateAsync();
+        Alert.alert(
+          'Đã tải xong bản mới',
+          'Bấm "Cập nhật ngay" để khởi động lại ứng dụng.',
+          [
+            { text: 'Để sau', style: 'cancel' },
+            { text: 'Cập nhật ngay', onPress: () => Updates.reloadAsync().catch(() => {}) },
+          ]
+        );
+      }
+    } catch (e) {
+      showAlert('Không kiểm tra được', 'Kiểm tra lại kết nối mạng: ' + (e?.message || ''));
+    }
+    setCheckingUpdate(false);
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -273,6 +306,21 @@ export default function HomeScreen() {
             <Ionicons name="help-circle-outline" size={18} color={DuoTheme.colors.grayText} />
             <Text style={styles.helpPillText}>Hướng dẫn luật chơi & tính năng</Text>
           </Pressable>
+
+          {Platform.OS !== 'web' && (
+            <Pressable
+              style={styles.installPill}
+              onPress={handleCheckOtaUpdate}
+              disabled={checkingUpdate}
+            >
+              <Ionicons name="refresh-circle-outline" size={18} color={DuoTheme.colors.primaryDark} />
+              <Text style={styles.installPillText}>
+                {checkingUpdate
+                  ? 'Đang kiểm tra bản cập nhật...'
+                  : `Kiểm tra cập nhật (${Updates.updateId ? Updates.updateId.slice(0, 8) : 'gốc'})`}
+              </Text>
+            </Pressable>
+          )}
 
           {Platform.OS === 'web' && (installMode === 'prompt' || installMode === 'ios') && (
             <Pressable style={styles.installPill} onPress={handleInstallPwa}>

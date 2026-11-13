@@ -143,3 +143,14 @@ Các case tính tiền có mã `ENG-xx` được khóa tự động bởi `npm t
 | PWA-03 [Smoke] | Bật chế độ Offline (tắt Wifi/4G), mở lối tắt từ màn hình chính (cold launch) và điều hướng/reload `/session?pin=...` | Trang Home và `/session` load tức thì, không báo mất kết nối mạng, hiển thị đủ icon `Ionicons`, dữ liệu `localStorage` giữ nguyên | |
 | PWA-04 | Deploy bản build mới (đổi `CACHE_NAME`), mở lại app khi có mạng | Service Worker tự tải cache mới (`skipWaiting`) và xóa cache cũ (`activate`) | |
 | PWA-05 | Kiểm tra `curl -sI https://volleyball-cashier.vercel.app/sw.js` sau khi deploy Vercel | Trả về `HTTP/2 200` (không phải `404 Not Found`) kèm `Cache-Control: public, max-age=0, must-revalidate` | |
+
+---
+
+## 13. Cập Nhật OTA Qua EAS Update (Android APK)
+
+| ID | Bước thực hiện | Kết quả kỳ vọng | Kết quả |
+|---|---|---|---|
+| OTA-01 [Smoke] | Chạy `node scripts/check-ota-config.mjs` | Khớp `runtimeVersion` (`1.0.0`) giữa `app.json` và `android/app/src/main/res/values/strings.xml`, đủ config trong `AndroidManifest.xml` | |
+| OTA-02 [Smoke] | Chạy `npx eas-cli update --branch main --message "..."` | `eas-cli update:list --branch main --limit 1` hiển thị `Runtime Version 1.0.0` với update ID mới nhất | |
+| OTA-03 [Smoke] | Gửi `curl` đến `u.expo.dev` với `expo-runtime-version: 1.0.0` | Trả về `updateId` mới nhất vừa phát hành | |
+| OTA-04 | Mở app APK `1.0.0` trên Android có mạng hoặc bấm "Kiểm tra cập nhật" | Tải xong bản mới và hiện hộp thoại bấm "Cập nhật ngay" (`Updates.reloadAsync()`) không cần cài lại APK | |
