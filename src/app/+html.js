@@ -2,16 +2,14 @@ import { ScrollViewStyleReset } from 'expo-router/html';
 
 const swRegisterScript = `
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function () {
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then(function (reg) {
-        if (reg && typeof reg.update === 'function') {
-          reg.update();
-        }
-      })
-      .catch(function () {});
-  });
+  navigator.serviceWorker
+    .register('/sw.js', { scope: '/' })
+    .then(function (reg) {
+      if (reg && typeof reg.update === 'function') {
+        reg.update();
+      }
+    })
+    .catch(function () {});
 }
 `;
 

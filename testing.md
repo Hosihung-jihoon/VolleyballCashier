@@ -138,7 +138,8 @@ Các case tính tiền có mã `ENG-xx` được khóa tự động bởi `npm t
 
 | ID | Bước thực hiện | Kết quả kỳ vọng | Kết quả |
 |---|---|---|---|
-| PWA-01 [Smoke] | Chạy `npm run build:web && node scripts/check-pwa-build.mjs` | Build ra `dist/` kèm `manifest.json`, icon 192/512/180, và `sw.js` precache đủ HTML/JS/CSS/Ionicons.ttf | |
-| PWA-02 [Smoke] | Mở web qua HTTPS/localhost trên Chrome (Android/Desktop) hoặc Safari (iOS) | Bấm nút **Cài đặt ứng dụng để dùng offline** (hoặc Share ➔ Thêm vào MH chính) tạo được lối tắt standalone | |
-| PWA-03 [Smoke] | Bật chế độ Offline (tắt Wifi/4G), mở ứng dụng từ lối tắt, tạo phiên `/session?pin=...` và reload trang | Trang Home và `/session` vẫn load tức thì, hiển thị đủ icon `Ionicons`, dữ liệu `localStorage` giữ nguyên | |
+| PWA-01 [Smoke] | Chạy `npm run build:web && node scripts/check-pwa-build.mjs` | Build ra `dist/` kèm `vercel.json`, `manifest.json`, icon 192/512/180, và `sw.js` precache gọn nhẹ (~10 file cốt lõi + `'/'` + `'/session'`) | |
+| PWA-02 [Smoke] | Mở web qua HTTPS/localhost trên Chrome (Android/Desktop) hoặc Safari (iOS) | Đợi badge `Đã lưu offline • Mở lại không cần mạng`, bấm **Cài đặt ứng dụng để dùng offline** (hoặc Share ➔ Thêm vào MH chính) tạo được lối tắt standalone | |
+| PWA-03 [Smoke] | Bật chế độ Offline (tắt Wifi/4G), mở lối tắt từ màn hình chính (cold launch) và điều hướng/reload `/session?pin=...` | Trang Home và `/session` load tức thì, không báo mất kết nối mạng, hiển thị đủ icon `Ionicons`, dữ liệu `localStorage` giữ nguyên | |
 | PWA-04 | Deploy bản build mới (đổi `CACHE_NAME`), mở lại app khi có mạng | Service Worker tự tải cache mới (`skipWaiting`) và xóa cache cũ (`activate`) | |
+| PWA-05 | Kiểm tra `curl -sI https://volleyball-cashier.vercel.app/sw.js` sau khi deploy Vercel | Trả về `HTTP/2 200` (không phải `404 Not Found`) kèm `Cache-Control: public, max-age=0, must-revalidate` | |

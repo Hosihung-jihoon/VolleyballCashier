@@ -8,9 +8,23 @@ if (!fs.existsSync(distDir)) {
   process.exit(1);
 }
 
-const ALLOWED_EXTS = new Set(['.html', '.js', '.css', '.ttf', '.woff', '.woff2', '.png', '.ico', '.json', '.svg']);
-const EXCLUDED_FILES = new Set(['/sw.js', '/metadata.json', '/assetmap.json', '/_expo/.routes.json']);
-const EXCLUDED_PREFIXES = ['/_expo/static/js/android/', '/_expo/static/js/ios/'];
+const CORE_FILES = new Set([
+  '/index.html',
+  '/session.html',
+  '/manifest.json',
+  '/favicon.ico',
+  '/logo192.png',
+  '/logo512.png',
+  '/apple-touch-icon.png',
+]);
+
+function isWantedAsset(relUrl) {
+  if (CORE_FILES.has(relUrl)) return true;
+  if (/^\/_expo\/static\/js\/web\/entry-[a-f0-9]+\.js$/.test(relUrl)) return true;
+  if (/^\/_expo\/static\/css\/global-[a-f0-9]+\.css$/.test(relUrl)) return true;
+  if (/\/Ionicons\.[a-f0-9]+\.ttf$/.test(relUrl)) return true;
+  return false;
+}
 
 function walk(dir, results = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -19,11 +33,7 @@ function walk(dir, results = []) {
       walk(full, results);
     } else {
       const relUrl = '/' + path.relative(distDir, full).split(path.sep).join('/');
-      const ext = path.extname(entry.name).toLowerCase();
-      if (!ALLOWED_EXTS.has(ext)) continue;
-      if (entry.name.endsWith('.map')) continue;
-      if (EXCLUDED_FILES.has(relUrl)) continue;
-      if (EXCLUDED_PREFIXES.some((p) => relUrl.startsWith(p))) continue;
+      if (!isWantedAsset(relUrl)) continue;
       results.push({ relUrl, full });
     }
   }
@@ -44,11 +54,45 @@ const CACHE_NAME = 'vc-pwa-${buildHash}';
 const PRECACHE_URLS = ${JSON.stringify(precacheUrls, null, 2)};
 const PRECACHE_SET = new Set(PRECACHE_URLS);
 
+async function toCleanResponse(resp) {
+  if (!resp.redirected) return resp;
+  const body = await resp.arrayBuffer();
+  const headers = new Headers(resp.headers);
+  return new Response(body, {
+    status: resp.status,
+    statusText: resp.statusText,
+    headers,
+  });
+}
+
+async function fetchAndStore(cache, url) {
+  const req = new Request(url, { cache: 'reload' });
+  const resp = await fetch(req);
+  if (!resp || !resp.ok) {
+    throw new Error('Precache failed: ' + url + ' -> ' + (resp && resp.status));
+  }
+  const clean = await toCleanResponse(resp);
+  await cache.put(url, clean.clone());
+  if (url === '/index.html') {
+    await cache.put('/', clean.clone());
+  } else if (url === '/session.html') {
+    await cache.put('/session', clean.clone());
+  }
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const coreUrls = PRECACHE_URLS.filter(
+        (u) => u === '/index.html' || u === '/session.html' || u.startsWith('/_expo/') || u.includes('Ionicons')
+      );
+      const optionalUrls = PRECACHE_URLS.filter((u) => !coreUrls.includes(u));
+      await Promise.all(coreUrls.map((u) => fetchAndStore(cache, u)));
+      await Promise.allSettled(optionalUrls.map((u) => fetchAndStore(cache, u)));
+      await self.skipWaiting();
+    })()
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -70,37 +114,49 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname === '/sw.js') return;
 
-  if (req.mode === 'navigate') {
-    let targetPath = url.pathname;
-    if (targetPath === '/' || targetPath === '') {
-      targetPath = '/index.html';
-    } else if (!PRECACHE_SET.has(targetPath)) {
-      const withHtml = targetPath.endsWith('/') ? targetPath.slice(0, -1) + '.html' : targetPath + '.html';
-      targetPath = PRECACHE_SET.has(withHtml) ? withHtml : '/index.html';
+  const isHtmlNav =
+    req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
+
+  if (isHtmlNav) {
+    let cleanPath = url.pathname;
+    if (cleanPath.length > 1 && cleanPath.endsWith('/')) {
+      cleanPath = cleanPath.slice(0, -1);
+    }
+    let targetPath = cleanPath;
+    if (cleanPath === '/' || cleanPath === '') {
+      targetPath = '/';
+    } else if (cleanPath === '/session') {
+      targetPath = '/session';
+    } else if (!PRECACHE_SET.has(cleanPath)) {
+      const withHtml = cleanPath + '.html';
+      targetPath = PRECACHE_SET.has(withHtml) ? withHtml : '/';
     }
 
     event.respondWith(
-      caches.open(CACHE_NAME).then((cache) =>
-        cache.match(targetPath, { ignoreSearch: true }).then(
-          (cached) => cached || fetch(req).catch(() => cache.match('/index.html'))
-        )
-      )
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached =
+          (await cache.match(targetPath, { ignoreSearch: true })) ||
+          (await cache.match('/index.html', { ignoreSearch: true })) ||
+          (await cache.match('/', { ignoreSearch: true }));
+        if (cached) return cached;
+        return fetch(req)
+          .then((resp) => (resp && resp.ok ? toCleanResponse(resp) : resp))
+          .catch(() => cache.match('/index.html'));
+      })
     );
     return;
   }
 
   event.respondWith(
-    caches.open(CACHE_NAME).then((cache) =>
-      cache.match(req, { ignoreSearch: true }).then((cached) => {
-        if (cached) return cached;
-        return fetch(req).then((resp) => {
-          if (resp && resp.status === 200 && resp.type === 'basic') {
-            cache.put(req, resp.clone());
-          }
-          return resp;
-        });
-      })
-    )
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const cached = await cache.match(req, { ignoreSearch: true });
+      if (cached) return cached;
+      const resp = await fetch(req);
+      if (resp && resp.status === 200 && resp.type === 'basic') {
+        cache.put(req, resp.clone());
+      }
+      return resp;
+    })
   );
 });
 `;

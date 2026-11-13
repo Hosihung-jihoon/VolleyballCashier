@@ -48,6 +48,48 @@ export default function HomeScreen() {
   const [lastPin, setLastPin] = useState(null);
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [installMode, setInstallMode] = useState(null); // 'prompt' | 'ios' | 'installed' | null
+  const [offlineStatus, setOfflineStatus] = useState(null); // 'checking' | 'ready' | 'unsupported' | null
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (!('serviceWorker' in navigator) || typeof caches === 'undefined') {
+      setOfflineStatus('unsupported');
+      return;
+    }
+
+    let cancelled = false;
+    let timer = null;
+    setOfflineStatus('checking');
+
+    const checkCacheReady = async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const keys = await caches.keys();
+        const pwaKey = keys.find((k) => k.startsWith('vc-pwa-'));
+        if (pwaKey) {
+          const cache = await caches.open(pwaKey);
+          const hasRoot = (await cache.match('/')) || (await cache.match('/index.html'));
+          if (!cancelled && reg?.active && hasRoot) {
+            setOfflineStatus('ready');
+            if (timer) {
+              clearInterval(timer);
+              timer = null;
+            }
+          }
+        }
+      } catch (_e) {}
+    };
+
+    checkCacheReady();
+    timer = setInterval(checkCacheReady, 1500);
+    navigator.serviceWorker.addEventListener('controllerchange', checkCacheReady);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+      navigator.serviceWorker.removeEventListener('controllerchange', checkCacheReady);
+    };
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -153,7 +195,7 @@ export default function HomeScreen() {
     if (installMode === 'ios') {
       showAlert(
         'Cài đặt dùng Offline (iPhone / iPad)',
-        '1. Bấm nút Chia sẻ (Share) ở thanh trình duyệt Safari.\n2. Chọn "Thêm vào MH chính" (Add to Home Screen).\n3. Mở app từ màn hình chính để dùng bình thường kể cả khi mất mạng.'
+        '1. Đợi dòng trạng thái bên dưới báo "Đã lưu offline".\n2. Bấm Chia sẻ (Share) trên Safari ➔ "Thêm vào MH chính".\n3. Mở icon vừa tạo trên màn hình chính 1 lần khi còn mạng để iOS kích hoạt bộ nhớ offline riêng.'
       );
     }
   };
@@ -241,6 +283,41 @@ export default function HomeScreen() {
                   : 'Hướng dẫn tạo lối tắt dùng offline (iOS)'}
               </Text>
             </Pressable>
+          )}
+
+          {Platform.OS === 'web' && offlineStatus && (
+            <View style={styles.offlineBadgeRow}>
+              <Ionicons
+                name={
+                  offlineStatus === 'ready'
+                    ? 'cloud-done-outline'
+                    : offlineStatus === 'unsupported'
+                      ? 'warning-outline'
+                      : 'cloud-download-outline'
+                }
+                size={14}
+                color={
+                  offlineStatus === 'ready'
+                    ? DuoTheme.colors.primaryGreen
+                    : offlineStatus === 'unsupported'
+                      ? DuoTheme.colors.yellowDark
+                      : DuoTheme.colors.grayText
+                }
+              />
+              <Text
+                style={[
+                  styles.offlineBadgeText,
+                  offlineStatus === 'ready' && styles.offlineBadgeTextReady,
+                  offlineStatus === 'unsupported' && styles.offlineBadgeTextWarn,
+                ]}
+              >
+                {offlineStatus === 'ready'
+                  ? 'Đã lưu offline • Mở lại không cần mạng'
+                  : offlineStatus === 'unsupported'
+                    ? 'Cần mở qua HTTPS để lưu dùng offline'
+                    : 'Đang tải gói dùng offline...'}
+              </Text>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -475,6 +552,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginLeft: 6,
+  },
+  offlineBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  offlineBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: DuoTheme.colors.grayText,
+    marginLeft: 5,
+  },
+  offlineBadgeTextReady: {
+    color: DuoTheme.colors.primaryGreen,
+  },
+  offlineBadgeTextWarn: {
+    color: DuoTheme.colors.yellowDark,
   },
 
   /* Modal */
