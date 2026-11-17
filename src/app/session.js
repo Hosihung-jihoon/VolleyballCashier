@@ -92,7 +92,7 @@ export default function SessionScreen() {
           const numB = parseInt(b[0].replace('set_', '')) || 0;
           return numB - numA;
         });
-        const latestId = sortedSets[0][0];
+        const latestId = sortedSets[0]?.[0] ?? null;
         setLatestSetId(latestId);
         
         // Đồng bộ số tiền cược từ database (tránh ghi đè khi Host đang nhập)
@@ -110,31 +110,22 @@ export default function SessionScreen() {
     return () => unsub();
   }, [pin]);
 
-  // Sync side match bet amount input when selectedMatchId or database updates
+  const sideSetsForSelectedMatch = Object.entries(session?.sideSets || {})
+    .filter(([, s]) => s.sideMatchId === selectedMatchId)
+    .sort((a, b) => {
+      const numA = parseInt(a[0].replace('side_set_', '')) || 0;
+      const numB = parseInt(b[0].replace('side_set_', '')) || 0;
+      return numB - numA;
+    });
+  const latestSideSetId = sideSetsForSelectedMatch[0]?.[0] || null;
+  const latestSideSet = latestSideSetId ? session.sideSets[latestSideSetId] : null;
+  const savedSideBetAmount = latestSideSet?.betAmount ?? session?.sideMatches?.[selectedMatchId]?.betAmount;
+
+  // Chỉ đồng bộ khi đổi kèo/set hoặc mức cược đã lưu, giữ draft khi dữ liệu khác đổi.
   useEffect(() => {
-    if (!session || selectedMatchId === 'main') return;
-    const matchSets = Object.entries(session.sideSets || {})
-      .filter(([_, s]) => s.sideMatchId === selectedMatchId)
-      .sort((a, b) => {
-        const numA = parseInt(a[0].replace('side_set_', '')) || 0;
-        const numB = parseInt(b[0].replace('side_set_', '')) || 0;
-        return numB - numA;
-      });
-    const latestId = matchSets[0]?.[0];
-    const lSideSet = latestId ? session.sideSets[latestId] : null;
-    if (lSideSet && lSideSet.betAmount !== undefined) {
-      setSideBetAmountInput(prev => {
-        if (prev === lSideSet.betAmount.toString()) return prev;
-        return lSideSet.betAmount.toString();
-      });
-    } else {
-      // default to match betAmount if no sets exist yet
-      const matchObj = session.sideMatches?.[selectedMatchId];
-      if (matchObj && matchObj.betAmount !== undefined) {
-        setSideBetAmountInput(matchObj.betAmount.toString());
-      }
-    }
-  }, [selectedMatchId, session?.sideSets, session?.sideMatches]);
+    if (selectedMatchId === 'main' || savedSideBetAmount == null) return;
+    setSideBetAmountInput(savedSideBetAmount.toString());
+  }, [selectedMatchId, latestSideSetId, savedSideBetAmount]);
 
   if (!session) return <View style={styles.center}><Text>Đang tải...</Text></View>;
 
@@ -144,17 +135,7 @@ export default function SessionScreen() {
 
   const activeTeams = session.meta?.teams || ['teamA', 'teamB'];
 
-  // Derived Side Match values
   const activeTab = selectedMatchId === 'main' ? 'main' : 'side';
-  const sideSetsForSelectedMatch = Object.entries(session.sideSets || {})
-    .filter(([_, s]) => s.sideMatchId === selectedMatchId)
-    .sort((a, b) => {
-      const numA = parseInt(a[0].replace('side_set_', '')) || 0;
-      const numB = parseInt(b[0].replace('side_set_', '')) || 0;
-      return numB - numA;
-    });
-  const latestSideSetId = sideSetsForSelectedMatch[0]?.[0] || null;
-  const latestSideSet = latestSideSetId ? session.sideSets[latestSideSetId] : null;
 
   const normalizeMatchup = (matchup) => {
     if (!matchup) return ['teamA', 'teamB'];
@@ -319,8 +300,12 @@ export default function SessionScreen() {
 
   const handleAddNewPlayer = async () => {
     if (!newPlayerName.trim()) return;
-    await addPlayerToSession(pin, newPlayerName.trim());
-    setNewPlayerName('');
+    try {
+      const playerId = await addPlayerToSession(pin, newPlayerName.trim());
+      if (playerId) setNewPlayerName('');
+    } catch (e) {
+      showAlert('Không thêm được người chơi', e.message || 'Hãy kiểm tra lại tên và thử lại.');
+    }
   };
 
   const handleAddToTeam = (pidOrPids, teamKey) => {
@@ -801,7 +786,7 @@ export default function SessionScreen() {
     if (sortedSets.length === 0) return null;
     const lastWinner = sortedSets[0][1].winner;
     let count = 0;
-    for (const [_, s] of sortedSets) {
+    for (const [, s] of sortedSets) {
       if (s.winner === lastWinner) count++;
       else break;
     }

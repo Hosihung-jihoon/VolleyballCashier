@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import * as Updates from 'expo-updates';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -16,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { DuoTheme } from '../constants/theme';
-import { createSession } from '../lib/sessionApi';
+import { createSession, getPlayerRoster, savePlayerRoster } from '../lib/sessionApi';
 
 const showAlert = (title, message, buttons = []) => {
   if (Platform.OS === 'web') {
@@ -43,7 +43,6 @@ const showAlert = (title, message, buttons = []) => {
 };
 
 export default function HomeScreen() {
-  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [lastPin, setLastPin] = useState(null);
@@ -51,6 +50,58 @@ export default function HomeScreen() {
   const [installMode, setInstallMode] = useState(null); // 'prompt' | 'ios' | 'installed' | null
   const [offlineStatus, setOfflineStatus] = useState(null); // 'checking' | 'ready' | 'unsupported' | null
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [roster, setRoster] = useState([]);
+  const [selectedRosterRows, setSelectedRosterRows] = useState([]);
+  const [rosterLoading, setRosterLoading] = useState(true);
+  const [rosterError, setRosterError] = useState('');
+  const [showRosterModal, setShowRosterModal] = useState(false);
+  const [rosterDraft, setRosterDraft] = useState('');
+  const [rosterDraftError, setRosterDraftError] = useState('');
+  const [savingRoster, setSavingRoster] = useState(false);
+
+  const loadRoster = useCallback(async () => {
+    setRosterLoading(true);
+    setRosterError('');
+    try {
+      const names = await getPlayerRoster();
+      setRoster(names);
+      setSelectedRosterRows(names.map((_, index) => index));
+    } catch (e) {
+      setRosterError(e.message || 'Không đọc được danh sách người chơi.');
+    } finally {
+      setRosterLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadRoster(); }, [loadRoster]);
+
+  const toggleRosterRow = (index) => {
+    setSelectedRosterRows(previous => previous.includes(index)
+      ? previous.filter(value => value !== index)
+      : [...previous, index]);
+  };
+
+  const openRosterEditor = () => {
+    setRosterDraft(roster.join('\n'));
+    setRosterDraftError('');
+    setShowRosterModal(true);
+  };
+
+  const handleSaveRoster = async () => {
+    if (savingRoster) return;
+    setSavingRoster(true);
+    setRosterDraftError('');
+    try {
+      const names = await savePlayerRoster(rosterDraft.split(/\r?\n/));
+      setRoster(names);
+      setSelectedRosterRows(names.map((_, index) => index));
+      setShowRosterModal(false);
+    } catch (e) {
+      setRosterDraftError(e.message || 'Không lưu được danh sách. Hãy thử lại.');
+    } finally {
+      setSavingRoster(false);
+    }
+  };
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -130,9 +181,6 @@ export default function HomeScreen() {
   useEffect(() => {
     const checkLastSession = async () => {
       try {
-        const savedName = await AsyncStorage.getItem('saved_user_name');
-        if (savedName) setName(savedName);
-
         const pinVal = await AsyncStorage.getItem('last_session_pin');
         if (pinVal) {
           setLastPin(pinVal);
@@ -169,19 +217,17 @@ export default function HomeScreen() {
   };
 
   const handleCreate = async () => {
-    if (!name.trim()) {
-      showAlert('Lỗi', 'Vui lòng nhập tên của bạn!');
-      return;
-    }
+    if (loading || rosterLoading || rosterError || savingRoster) return;
     setLoading(true);
     try {
-      await AsyncStorage.setItem('saved_user_name', name.trim());
-      const { pin: newPin } = await createSession(name.trim());
+      const names = roster.filter((_, index) => selectedRosterRows.includes(index));
+      const { pin: newPin } = await createSession(names);
       router.push({ pathname: '/session', params: { pin: newPin, role: 'host' } });
     } catch (e) {
       showAlert('Lỗi', e.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleInstallPwa = async () => {
@@ -254,17 +300,72 @@ export default function HomeScreen() {
 
         {/* Input Card Container */}
         <View style={styles.cardContainer}>
-          <Text style={styles.inputLabel}>Người quản lý / Chủ xị</Text>
-          <View style={styles.inputWrapper}>
-            <Ionicons name="person-outline" size={20} color={DuoTheme.colors.primary} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Nhập tên người quản lý..."
-              placeholderTextColor={DuoTheme.colors.grayMuted}
-              value={name}
-              onChangeText={setName}
-            />
-          </View>
+          <Text style={styles.inputLabel}>Danh sách người chơi mặc định</Text>
+          <Text style={styles.rosterHint}>
+            Chọn người tham gia buổi hôm nay, bỏ chọn người vắng. Khi chia đều tiền sân, tất cả người được chọn đều được tính tiền. Danh sách mặc định lưu trên thiết bị này.
+          </Text>
+          {rosterLoading ? (
+            <Text style={styles.rosterHint}>Đang đọc danh sách...</Text>
+          ) : rosterError ? (
+            <View>
+              <Text accessibilityRole="alert" style={styles.rosterError}>{rosterError}</Text>
+              <Pressable accessibilityRole="button" style={styles.helpPill} onPress={loadRoster}>
+                <Text style={styles.helpPillText}>Thử lại</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View>
+              <View style={styles.rosterChips}>
+                {roster.map((playerName, index) => {
+                  const checked = selectedRosterRows.includes(index);
+                  return (
+                    <Pressable
+                      key={index}
+                      accessibilityRole="checkbox"
+                      accessibilityLabel={`${playerName}, vị trí ${index + 1}`}
+                      accessibilityState={{ checked, disabled: loading }}
+                      aria-checked={checked}
+                      disabled={loading}
+                      onPress={() => toggleRosterRow(index)}
+                      onKeyDown={Platform.OS === 'web' ? event => {
+                        // ponytail: RN Web chỉ xử lý Space cho role=button; checkbox cần tự bắt phím này.
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          if (!event.repeat && !loading) toggleRosterRow(index);
+                        }
+                      } : undefined}
+                      style={[styles.rosterChip, checked && styles.rosterChipSelected]}
+                    >
+                      <Ionicons
+                        name={checked ? 'checkbox-outline' : 'square-outline'}
+                        size={18}
+                        color={DuoTheme.colors.primaryDark}
+                      />
+                      <Text style={styles.installPillText}>{playerName}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {!roster.length && (
+                <Text style={styles.rosterHint}>Chưa có danh sách. Nhập mỗi người một dòng để dùng lại ở các buổi sau.</Text>
+              )}
+              {!!roster.length && (
+                <View style={styles.rosterActions}>
+                  <Pressable accessibilityRole="button" style={styles.rosterSmallAction} disabled={loading} onPress={() => setSelectedRosterRows(roster.map((_, index) => index))}>
+                    <Text style={styles.installPillText}>Chọn tất cả</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" style={styles.rosterSmallAction} disabled={loading} onPress={() => setSelectedRosterRows([])}>
+                    <Text style={styles.installPillText}>Bỏ chọn tất cả</Text>
+                  </Pressable>
+                </View>
+              )}
+              <Pressable accessibilityRole="button" style={styles.helpPill} onPress={openRosterEditor} disabled={loading}>
+                <Ionicons name="people-outline" size={18} color={DuoTheme.colors.primaryDark} />
+                <Text style={styles.installPillText}>Chỉnh sửa danh sách</Text>
+              </Pressable>
+              <Text style={styles.rosterHint}>Đã chọn {selectedRosterRows.length}/{roster.length} người</Text>
+            </View>
+          )}
 
           {/* Action Buttons */}
           {lastPin && (
@@ -291,7 +392,8 @@ export default function HomeScreen() {
               pressed && styles.btnPressed,
             ]}
             onPress={handleCreate}
-            disabled={loading}
+            accessibilityRole="button"
+            disabled={loading || rosterLoading || !!rosterError || savingRoster}
           >
             <View style={styles.btnContent}>
               <Ionicons name="add-circle" size={20} color="#FFFFFF" style={styles.btnIcon} />
@@ -450,6 +552,58 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showRosterModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!savingRoster) setShowRosterModal(false); }}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalContent}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <Text style={styles.modalTitle}>Danh sách người chơi mặc định</Text>
+            <Text style={styles.rosterHint}>
+              Mỗi dòng một người, tên không được trùng. Nếu hai người cùng tên, thêm biệt danh như An cao và An thấp. Chỉ dùng cho buổi mới.
+            </Text>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <TextInput
+                accessibilityLabel="Tên người chơi, mỗi dòng một người"
+                multiline
+                autoCorrect={false}
+                textAlignVertical="top"
+                style={[styles.input, styles.rosterTextArea]}
+                placeholder={'Ví dụ:\nAn\nBình\nHùng'}
+                placeholderTextColor={DuoTheme.colors.grayMuted}
+                value={rosterDraft}
+                editable={!savingRoster}
+                onChangeText={setRosterDraft}
+              />
+              {!!rosterDraftError && (
+                <Text accessibilityRole="alert" style={styles.rosterError}>{rosterDraftError}</Text>
+              )}
+            </ScrollView>
+            <Pressable
+              accessibilityRole="button"
+              disabled={savingRoster}
+              onPress={handleSaveRoster}
+              style={[styles.actionBtn, styles.btnPrimary]}
+            >
+              <Text style={styles.btnTextPrimary}>{savingRoster ? 'Đang lưu...' : 'Lưu danh sách'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={savingRoster}
+              onPress={() => setShowRosterModal(false)}
+              style={styles.helpPill}
+            >
+              <Text style={styles.helpPillText}>Hủy</Text>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -506,19 +660,41 @@ const styles = StyleSheet.create({
     color: DuoTheme.colors.grayDark,
     marginBottom: 8,
   },
-  inputWrapper: {
+  rosterHint: {
+    color: DuoTheme.colors.grayText,
+    fontSize: 13,
+    lineHeight: 19,
+    marginVertical: 10,
+  },
+  rosterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  rosterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: DuoTheme.colors.border,
+    borderRadius: DuoTheme.borderRadius.md,
+  },
+  rosterChipSelected: {
+    backgroundColor: DuoTheme.colors.primaryLight,
+    borderColor: DuoTheme.colors.primary,
+  },
+  rosterActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  rosterSmallAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 6 },
+  rosterTextArea: {
+    flex: 0,
+    height: 180,
+    minHeight: 140,
+    width: '100%',
+    borderWidth: 1,
     borderColor: DuoTheme.colors.borderDark,
     borderRadius: DuoTheme.borderRadius.md,
-    paddingHorizontal: 14,
-    marginBottom: 16,
+    padding: 12,
+    marginBottom: 12,
   },
-  inputIcon: {
-    marginRight: 10,
-  },
+  rosterError: { color: DuoTheme.colors.red, fontSize: 13, marginVertical: 8 },
   input: {
     flex: 1,
     height: 50,

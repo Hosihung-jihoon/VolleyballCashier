@@ -10,9 +10,9 @@ Các case tính tiền có mã `ENG-xx` được khóa tự động bởi `npm t
 
 | ID | Bước thực hiện | Kết quả kỳ vọng | Kết quả |
 |---|---|---|---|
-| HOME-01 [Smoke] | Để trống tên, bấm "BẮT ĐẦU BUỔI CHƠI MỚI" | Alert "Lỗi — Vui lòng nhập tên của bạn!", không chuyển màn hình | |
-| HOME-02 | Nhập tên "Hùng" -> Bấm "BẮT ĐẦU BUỔI CHƠI MỚI" | Chuyển sang Session với PIN dạng `L-xxxx`, vai trò Host, tên Hùng được lưu tự động | |
-| HOME-03 | Đóng app hoàn toàn rồi mở lại | Ô tên vẫn hiển thị "Hùng" (đã lưu vào máy) | |
+| HOME-01 [Smoke] | Mở Home trên dữ liệu mới, bấm "BẮT ĐẦU BUỔI CHƠI MỚI" | Không có ô tên chủ xị; tạo được buổi với 0 người, không lỗi khi chưa có set | |
+| HOME-02 | Lưu An/Bình/Hùng, chọn người có mặt rồi bắt đầu | Chuyển sang Session với PIN `L-xxxx`, vai trò Host; chỉ người đã chọn vào danh sách chờ với số dư 0 | |
+| HOME-03 | Đóng app hoàn toàn rồi mở lại | Danh sách mặc định còn nguyên, tất cả tên được chọn trên Home mới | |
 | HOME-04 [Smoke] | Khi đã có buổi chơi chưa kết thúc, mở app | Xuất hiện nút vàng "Tiếp tục buổi chơi"; bấm vào quay lại đúng phiên chơi cũ | |
 | HOME-05 | Bấm "Hướng dẫn luật chơi & tính năng" | Modal cẩm nang hiện; hiển thị đúng quy tắc tiền chẵn và tiền thừa sân; bấm "ĐÃ HIỂU" đóng modal | |
 | HOME-06 | Phiên chơi offline cũ đã quá 24h | Tự động dọn dẹp khỏi bộ nhớ máy khi mở Home (`parsed.meta.createdAt`) | |
@@ -26,7 +26,7 @@ Các case tính tiền có mã `ENG-xx` được khóa tự động bởi `npm t
 | PLY-01 [Smoke] | Nhập tên "Nguyễn Văn A" -> Bấm "+" | Tên xuất hiện ở Danh sách chờ, ô nhập rỗng | |
 | PLY-02 | Nhập tên rồi bấm Enter/Submit bàn phím | Thêm người thành công như bấm "+" | |
 | PLY-03 | Bấm "+" khi ô nhập trống hoặc chỉ có dấu cách | Không thêm, không báo lỗi | |
-| PLY-04 | Thêm người trùng tên | Cả 2 được thêm với id riêng biệt, không đè nhau | |
+| PLY-04 | Thêm tên đã có, kể cả khác hoa/thường hoặc khoảng trắng, ở form trận chính/kèo phụ | Hiện cảnh báo tên đã tồn tại; không thêm player, input và số dư giữ nguyên | |
 | PLY-05 | Đã chia tất cả người chơi vào các đội | Danh sách chờ hiển thị "Tất cả đã lên sân!" | |
 
 ---
@@ -100,6 +100,13 @@ Các case tính tiền có mã `ENG-xx` được khóa tự động bởi `npm t
 | SIDE-02 | Chia đội và bấm thắng trong kèo phụ | Tiền cược kèo phụ cộng dồn vào số dư chung của từng người chơi | |
 | SIDE-03 | Chuyển qua lại giữa Trận chính và Kèo phụ | Mỗi bên giữ nguyên đội hình, ô cược và set đấu độc lập | |
 | SIDE-04 | Xóa kèo phụ | Hoàn trả toàn bộ số dư của các set trong kèo phụ đó | |
+| SIDE-05 [Smoke] | Kèo chưa có set: nhập `12.345` vào ô cược rồi thêm một người chơi | Ô cược vẫn `12.345`; cập nhật dữ liệu người chơi không đồng bộ đè nội dung đang nhập | |
+| SIDE-06 | Chuyển qua lại kèo A 5.000đ và kèo B 10.000đ | Mỗi lần chọn kèo, ô cược nhận đúng mức đã lưu của kèo đó | |
+| SIDE-07 | Chuyển sang set kèo phụ mới có cùng mức cược với set trước | Ô cược đồng bộ về mức cược đã lưu của set mới; không giữ draft của set trước | |
+| SIDE-08 | Set kèo phụ lưu mức cược 0đ hoặc đổi mức đã lưu thành 20.000đ | Ô cược hiện đúng `0` hoặc `20.000`, không coi 0 là thiếu dữ liệu | |
+| SIDE-09 | Đang soạn cược cho set đã kết thúc; thay đổi đội hình hoặc dữ liệu kèo khác | Draft giữ nguyên nếu kèo/set đang chọn và mức cược đã lưu không thay đổi | |
+
+Self-check `scripts/check-session-input.mjs` (chạy trong `npm test`) thực thi component thật với runtime hook/native giả lập, kiểm tra đồng bộ ô cược và badge chuỗi thắng. Kiểm thử này không thay cho thao tác trên thiết bị thật.
 
 ---
 
@@ -154,3 +161,30 @@ Các case tính tiền có mã `ENG-xx` được khóa tự động bởi `npm t
 | OTA-02 [Smoke] | Chạy `npx eas-cli update --branch main --message "..."` | `eas-cli update:list --branch main --limit 1` hiển thị `Runtime Version 1.0.0` với update ID mới nhất | |
 | OTA-03 [Smoke] | Gửi `curl` đến `u.expo.dev` với `expo-runtime-version: 1.0.0` | Trả về `updateId` mới nhất vừa phát hành | |
 | OTA-04 | Mở app APK `1.0.0` trên Android có mạng hoặc bấm "Kiểm tra cập nhật" | Tải xong bản mới và hiện hộp thoại bấm "Cập nhật ngay" (`Updates.reloadAsync()`) không cần cài lại APK | |
+
+---
+
+## 14. Danh sách người chơi mặc định
+
+Mẫu tên lưu qua AsyncStorage key `saved_player_roster_v1`, tách biệt `local_session_*` và cache tài nguyên PWA; không hết hạn sau 24 giờ. APK lưu trong bộ nhớ riêng của ứng dụng, Web/PWA dùng localStorage theo trình duyệt/origin. Không tự đồng bộ; xóa dữ liệu ứng dụng/website có thể làm mất danh sách. Mỗi buổi chỉ sao chép tên đã chọn, số dư khởi tạo 0. Khách thêm trong trận không tự lưu vào mẫu.
+
+Tên được chuẩn hóa Unicode NFC, trim/gộp khoảng trắng và so sánh không phân biệt hoa/thường; giữ dấu tiếng Việt (`An` khác `Ân`). Tên trùng bị chặn, không tự gộp hay đổi tên. Khi chia đều tiền sân, tất cả người đưa vào buổi đều được tính tiền, kể cả chưa vào set.
+
+Self-check API: `node --no-warnings scripts/check-player-roster.mjs` (cũng chạy trong `npm test`); chỉ thay native storage boundary, không thay business logic. Các case giao diện/thiết bị dưới đây phải kiểm tra riêng.
+
+| ID | Bước thực hiện | Kết quả kỳ vọng | Kết quả |
+|---|---|---|---|
+| ROSTER-01 | Đã lưu An/Bình/Hùng; sửa draft thành `  An  `, dòng trống, Bình, An rồi bấm Lưu | Cảnh báo tên An đã tồn tại; modal còn mở và draft giữ nguyên; dữ liệu đã lưu vẫn là An/Bình/Hùng. | |
+| ROSTER-02 | Lưu An/Bình/Hùng, bỏ chọn Bình rồi tạo buổi | Chỉ An/Hùng vào buổi mới; mẫu vẫn có Bình. | |
+| ROSTER-03 | Chỉnh nội dung modal rồi Hủy/Back | Home và key lưu không đổi. | |
+| ROSTER-04 | Xóa mọi dòng và Lưu | `[]` được lưu hợp lệ; buổi mới rỗng, thêm tay trong trận vẫn được. | |
+| ROSTER-05 | Tạo hai buổi, buổi đầu có tiền/đã thu | Buổi sau chỉ copy tên; không mang balance, isSettled, sets, courtFee, playerBets. | |
+| ROSTER-06 | Có buổi cũ quá 24 giờ rồi mở Home | Buổi cũ bị dọn như hiện tại; roster còn nguyên. | |
+| ROSTER-07 | Thêm Khách ở form trận chính và kèo phụ | Khách vào session, không tự thay đổi danh sách mẫu. | |
+| ROSTER-08 | Mất mạng, sửa roster và tạo buổi | Lưu, đóng/mở lại và tạo buổi vẫn hoạt động trên app đã chuẩn bị offline. | |
+| ROSTER-09 | Trong test storage báo lỗi đọc/ghi | Hiện lỗi, không xóa dữ liệu; save lỗi giữ draft, không báo đã lưu. | |
+| ROSTER-10 | Mở Home bằng bàn phím/screen reader; dùng Tab, Space và Enter trên checkbox | Checkbox đọc tên, vị trí, trạng thái chọn; Space/Enter bật tắt lựa chọn; nút có role; thao tác chạm tối thiểu 44px | |
+| ROSTER-11 | Buổi có An; nhập ` an ` hoặc `AN` ở form trận chính và kèo phụ | Cả hai form cảnh báo tên đã tồn tại, không thêm player, không đổi số dư; input không bị xóa để người dùng sửa tên. | |
+| ROSTER-12 | Mẫu có ba tên, bấm Bỏ chọn tất cả rồi bắt đầu; sau đó mở lại Home mới | Buổi tạo thành công với players rỗng, không lỗi subscriber; mẫu vẫn ba tên, Home mới chọn lại cả ba. | |
+| ROSTER-13 | Nhập hai dòng `Nguyễn  Văn A` và `nguyễn văn a`, hoặc Hùng và cùng tên ở dạng Unicode tổ hợp | Cảnh báo và chặn Lưu theo cùng quy tắc chuẩn hóa, không tự gộp/bỏ dòng trùng. | |
+| ROSTER-14 | Đổi hai tên An thành An cao/An thấp rồi Lưu | Lưu được hai tên phân biệt; tạo buổi với đúng hai player số dư 0. | |

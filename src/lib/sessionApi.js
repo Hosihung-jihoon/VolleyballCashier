@@ -19,6 +19,41 @@ const saveSessionData = async (pin, data) => {
   await triggerLocalUpdate(pin, data);
 };
 
+const normalizePlayerNames = (names, existingNames = []) => {
+  if (!Array.isArray(names) || names.some(name => typeof name !== 'string')) {
+    throw new Error('Danh sách người chơi phải là mảng tên.');
+  }
+  const cleanName = name => name.normalize('NFC').trim().replace(/\s+/g, ' ');
+  const normalized = names.map(cleanName).filter(Boolean);
+  const seen = new Set(existingNames
+    .filter(name => typeof name === 'string')
+    .map(name => cleanName(name).toLocaleLowerCase('vi-VN')));
+  for (const name of normalized) {
+    const key = name.toLocaleLowerCase('vi-VN');
+    if (seen.has(key)) {
+      throw new Error(`Tên "${name}" đã tồn tại. Vui lòng dùng tên khác hoặc thêm biệt danh.`);
+    }
+    seen.add(key);
+  }
+  return normalized;
+};
+
+export const savePlayerRoster = async (names) => {
+  const normalized = normalizePlayerNames(names);
+  await AsyncStorage.setItem('saved_player_roster_v1', JSON.stringify(normalized));
+  return normalized;
+};
+
+export const getPlayerRoster = async () => {
+  const value = await AsyncStorage.getItem('saved_player_roster_v1');
+  if (value === null) return [];
+  try {
+    return normalizePlayerNames(JSON.parse(value));
+  } catch (e) {
+    throw new Error(`Danh sách đã lưu bị lỗi: ${e.message} Dữ liệu cũ chưa bị thay đổi.`);
+  }
+};
+
 // Lấy hoặc tạo Device ID để định danh Host
 export const getDeviceId = async () => {
   let deviceId = await AsyncStorage.getItem('device_id');
@@ -30,19 +65,23 @@ export const getDeviceId = async () => {
 };
 
 // TẠO PHÒNG MỚI (100% Offline)
-export const createSession = async (hostName) => {
+export const createSession = async (initialPlayerNames = []) => {
+  const names = normalizePlayerNames(initialPlayerNames);
   const deviceId = await getDeviceId();
   const now = Date.now();
+  const players = Object.fromEntries(names.map((name, index) => [
+    `player_local_${now}_${index}`,
+    { name, balance: 0 },
+  ]));
 
   const sessionData = {
     meta: {
       hostId: deviceId,
-      hostName: hostName,
       createdAt: now,
       isOffline: true,
-      teams: ['teamA', 'teamB']
+      teams: ['teamA', 'teamB'],
     },
-    players: {},
+    players,
     sets: {},
   };
 
@@ -62,8 +101,13 @@ export const joinSession = async (pin, memberName) => {
 
   if (!session.players) session.players = {};
   if (!session.players[playerId]) {
+    const [name] = normalizePlayerNames(
+      [memberName],
+      Object.values(session.players).map(player => player.name)
+    );
+    if (!name) throw new Error('Vui lòng nhập tên người chơi.');
     session.players[playerId] = {
-      name: memberName,
+      name,
       balance: 0,
     };
     await saveSessionData(pin, session);
@@ -372,9 +416,14 @@ export const addPlayerToSession = async (pin, playerName) => {
   const session = await getSessionData(pin);
   if (!session) return null;
   if (!session.players) session.players = {};
+  const [name] = normalizePlayerNames(
+    [playerName],
+    Object.values(session.players).map(player => player.name)
+  );
+  if (!name) throw new Error('Vui lòng nhập tên người chơi.');
   const newPlayerId = 'player_local_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
   session.players[newPlayerId] = {
-    name: playerName,
+    name,
     balance: 0,
   };
   await saveSessionData(pin, session);
