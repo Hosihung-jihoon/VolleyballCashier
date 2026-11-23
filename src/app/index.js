@@ -5,7 +5,6 @@ import * as Updates from 'expo-updates';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -15,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardSafeModal } from '../components/keyboard-safe-view';
 import { DuoTheme } from '../constants/theme';
 import { createSession, getPlayerRoster, savePlayerRoster } from '../lib/sessionApi';
 
@@ -280,10 +280,7 @@ export default function HomeScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -553,22 +550,18 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      <Modal
-        visible={showRosterModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => { if (!savingRoster) setShowRosterModal(false); }}
-      >
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView
-            style={styles.modalContent}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <Text style={styles.modalTitle}>Danh sách người chơi mặc định</Text>
-            <Text style={styles.rosterHint}>
-              Mỗi dòng một người, tên không được trùng. Nếu hai người cùng tên, thêm biệt danh như An cao và An thấp. Chỉ dùng cho buổi mới.
-            </Text>
-            <ScrollView keyboardShouldPersistTaps="handled">
+      {showRosterModal && (
+        <KeyboardSafeModal
+          visible={showRosterModal}
+          onRequestClose={() => { if (!savingRoster) setShowRosterModal(false); }}
+          overlayStyle={styles.modalOverlay}
+        >
+          <View style={[styles.modalContent, { maxHeight: '100%' }]}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalTitle}>Danh sách người chơi mặc định</Text>
+              <Text style={styles.rosterHint}>
+                Mỗi dòng một người, tên không được trùng. Nếu hai người cùng tên, thêm biệt danh như An cao và An thấp. Chỉ dùng cho buổi mới.
+              </Text>
               <TextInput
                 accessibilityLabel="Tên người chơi, mỗi dòng một người"
                 multiline
@@ -584,27 +577,27 @@ export default function HomeScreen() {
               {!!rosterDraftError && (
                 <Text accessibilityRole="alert" style={styles.rosterError}>{rosterDraftError}</Text>
               )}
+              <Pressable
+                accessibilityRole="button"
+                disabled={savingRoster}
+                onPress={handleSaveRoster}
+                style={[styles.actionBtn, styles.btnPrimary]}
+              >
+                <Text style={styles.btnTextPrimary}>{savingRoster ? 'Đang lưu...' : 'Lưu danh sách'}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={savingRoster}
+                onPress={() => setShowRosterModal(false)}
+                style={styles.helpPill}
+              >
+                <Text style={styles.helpPillText}>Hủy</Text>
+              </Pressable>
             </ScrollView>
-            <Pressable
-              accessibilityRole="button"
-              disabled={savingRoster}
-              onPress={handleSaveRoster}
-              style={[styles.actionBtn, styles.btnPrimary]}
-            >
-              <Text style={styles.btnTextPrimary}>{savingRoster ? 'Đang lưu...' : 'Lưu danh sách'}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              disabled={savingRoster}
-              onPress={() => setShowRosterModal(false)}
-              style={styles.helpPill}
-            >
-              <Text style={styles.helpPillText}>Hủy</Text>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-    </KeyboardAvoidingView>
+          </View>
+        </KeyboardSafeModal>
+      )}
+    </View>
   );
 }
 

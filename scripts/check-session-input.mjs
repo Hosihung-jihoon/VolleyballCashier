@@ -32,24 +32,40 @@ const react = {
       effects.push(setup);
     }
   },
+  useRef(initial) {
+    const index = cursor++;
+    if (!(index in slots)) slots[index] = { current: initial };
+    return slots[index];
+  },
 };
 const jsx = (type, props) => ({ type, props });
 const native = {
   Platform: { OS: 'web' },
   StyleSheet: { create: styles => styles },
+  Keyboard: {
+    isVisible: () => false,
+    metrics: () => null,
+    addListener: () => ({ remove() {} }),
+    scheduleLayoutAnimation: () => {},
+  },
+  BackHandler: {
+    addEventListener: () => ({ remove() {} }),
+  },
   ...Object.fromEntries(['Alert', 'KeyboardAvoidingView', 'Modal', 'ScrollView', 'Text', 'TextInput', 'TouchableOpacity', 'View'].map(name => [name, name])),
 };
 const api = {
   subscribeToSession(_pin, notify) { notifySession = notify; notify(selectedFixture); return () => {}; },
 };
-const source = fs.readFileSync(new URL('../src/app/session.js', import.meta.url), 'utf8');
-const { code } = transformSync(source, {
-  filename: 'session.js',
+const compile = relPath => transformSync(fs.readFileSync(new URL(relPath, import.meta.url), 'utf8'), {
+  filename: relPath,
   configFile: false,
   babelrc: false,
   plugins: [['@babel/plugin-transform-react-jsx', { runtime: 'automatic' }], '@babel/plugin-transform-modules-commonjs'],
-});
+}).code;
+const { code } = { code: compile('../src/app/session.js') };
+const keyboardSafeModule = { exports: {} };
 const module = { exports: {} };
+let keyboardSafeLoaded = false;
 const context = vm.createContext({
   module,
   exports: module.exports,
@@ -57,6 +73,18 @@ const context = vm.createContext({
     if (name === 'react') return react;
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
     if (name === 'react-native') return native;
+    if (name === 'react-native-safe-area-context') return { useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) };
+    if (name === '../components/keyboard-safe-view') {
+      if (!keyboardSafeLoaded) {
+        keyboardSafeLoaded = true;
+        vm.runInContext(compile('../src/components/keyboard-safe-view.js'), vm.createContext({
+          module: keyboardSafeModule,
+          exports: keyboardSafeModule.exports,
+          require: context.require,
+        }));
+      }
+      return keyboardSafeModule.exports;
+    }
     if (name === 'expo-router') return { router: {}, useLocalSearchParams: () => ({ pin: 'L-CHECK', role: 'host' }) };
     if (name === '@react-native-async-storage/async-storage') return { setItem: async () => {} };
     if (name === '@expo/vector-icons') return { Ionicons: 'Icon' };

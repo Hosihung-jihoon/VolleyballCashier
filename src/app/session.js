@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardSafeModal, KeyboardSafeView } from '../components/keyboard-safe-view';
 import { DuoTheme } from '../constants/theme';
 import { calculateSettlement } from '../lib/bettingEngine';
 import { addPlayerToSession, addSideMatch, deleteSideMatch, addTeamToSession, deleteTeamFromSession, finishSession, finishSet, finishSideSet, startNewSet, startNewSideSet, subscribeToSession, togglePlayerSettled, undoFinishSession, undoSet, undoSideSet, updateMatchup, updatePlayerBet, updateSetBetAmount, updateSetTeams, updateSetWinner, updateSidePlayerBet, updateSideSetBetAmount, updateSideSetTeams, updateSideSetWinner } from '../lib/sessionApi';
@@ -74,6 +75,22 @@ export default function SessionScreen() {
   const [sideBetAmountInput, setSideBetAmountInput] = useState('5000');
   const [sideSubTarget, setSideSubTarget] = useState(null);
   const [sideTeamPickerPlayerId, setSideTeamPickerPlayerId] = useState(null);
+
+  const scrollViewRef = useRef(null);
+  const waitingYRef = useRef(0);
+  const addPlayerFocusedRef = useRef(false);
+
+  const scrollWaitingIntoView = () => {
+    scrollViewRef.current?.scrollTo?.({
+      y: Math.max(0, waitingYRef.current - 12),
+      animated: true,
+    });
+  };
+
+  const handleKeyboardShow = () => {
+    if (!addPlayerFocusedRef.current) return;
+    setTimeout(scrollWaitingIntoView, 50);
+  };
 
   useEffect(() => {
     if (pin && role) {
@@ -795,7 +812,8 @@ export default function SessionScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <KeyboardSafeView style={styles.container} onKeyboardShow={handleKeyboardShow}>
+        <View style={styles.header}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <TouchableOpacity onPress={handleGoBack} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={20} color={DuoTheme.colors.grayDark} />
@@ -847,10 +865,11 @@ export default function SessionScreen() {
         </View>
       )}
 
-      <ScrollView 
-        style={styles.body} 
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.body}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: (isHost && (activeTab === 'main' || activeTab === 'side' || session.meta?.status === 'finished')) ? 120 : 20 }}
+        contentContainerStyle={{ paddingBottom: 24 }}
       >
         {session.meta?.status === 'finished' && (
           <View style={styles.checkoutBanner}>
@@ -1014,11 +1033,27 @@ export default function SessionScreen() {
           <View style={styles.center}><Text>Chưa có set nào. Bấm {"'Bắt đầu'"} bên dưới!</Text></View>
         )}
 
-        <View style={styles.waitingContainer}>
+        <View
+          style={styles.waitingContainer}
+          onLayout={(e) => { waitingYRef.current = e.nativeEvent.layout.y; }}
+        >
           <Text style={styles.sectionTitle}>Danh sách chờ (Bấm để chọn đội):</Text>
           {isHost && (
             <View style={styles.addPlayerForm}>
-              <TextInput style={styles.addPlayerInput} placeholder="Nhập tên..." value={newPlayerName} onChangeText={setNewPlayerName} onSubmitEditing={handleAddNewPlayer} />
+              <TextInput
+                style={styles.addPlayerInput}
+                placeholder="Nhập tên..."
+                value={newPlayerName}
+                onChangeText={setNewPlayerName}
+                onSubmitEditing={handleAddNewPlayer}
+                onFocus={() => {
+                  addPlayerFocusedRef.current = true;
+                  scrollWaitingIntoView();
+                }}
+                onBlur={() => {
+                  addPlayerFocusedRef.current = false;
+                }}
+              />
               <TouchableOpacity style={styles.addBtn} onPress={handleAddNewPlayer}><Text style={styles.addBtnText}>+</Text></TouchableOpacity>
             </View>
           )}
@@ -1188,11 +1223,27 @@ export default function SessionScreen() {
               <View style={styles.center}><Text>Chưa có set kèo phụ nào. Bấm {"'Bắt đầu'"} bên dưới!</Text></View>
             )}
 
-            <View style={styles.waitingContainer}>
+            <View
+              style={styles.waitingContainer}
+              onLayout={(e) => { waitingYRef.current = e.nativeEvent.layout.y; }}
+            >
               <Text style={styles.sectionTitle}>Danh sách chờ (Bấm để chọn đội):</Text>
               {isHost && (
                 <View style={styles.addPlayerForm}>
-                  <TextInput style={styles.addPlayerInput} placeholder="Nhập tên..." value={newPlayerName} onChangeText={setNewPlayerName} onSubmitEditing={handleAddNewPlayer} />
+                  <TextInput
+                    style={styles.addPlayerInput}
+                    placeholder="Nhập tên..."
+                    value={newPlayerName}
+                    onChangeText={setNewPlayerName}
+                    onSubmitEditing={handleAddNewPlayer}
+                    onFocus={() => {
+                      addPlayerFocusedRef.current = true;
+                      scrollWaitingIntoView();
+                    }}
+                    onBlur={() => {
+                      addPlayerFocusedRef.current = false;
+                    }}
+                  />
                   <TouchableOpacity style={styles.addBtn} onPress={handleAddNewPlayer}><Text style={styles.addBtnText}>+</Text></TouchableOpacity>
                 </View>
               )}
@@ -1488,100 +1539,6 @@ export default function SessionScreen() {
         </View>
       </ScrollView>
 
-        {/* Modal Kết thúc buổi chơi */}
-        <Modal
-          visible={finishModalVisible}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setFinishModalVisible(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalOverlay}
-          >
-            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                <View>
-                  <Text style={styles.modalTitle}>Kết thúc buổi chơi</Text>
-                  <Text style={styles.modalSubTitle}>Nhập tổng tiền sân để tính toán chia phí cho các thành viên.</Text>
-                  
-                  <TextInput
-                    style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, marginBottom: 15, paddingVertical: 10 }]}
-                    keyboardType="numeric"
-                    placeholder="Tổng tiền sân (đ)..."
-                    value={formatMoney(courtFeeInput)}
-                    onChangeText={(val) => setCourtFeeInput(parseMoney(val).toString())}
-                    autoFocus
-                  />
-
-                  <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
-                    Phương thức chia tiền sân:
-                  </Text>
-                  
-                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
-                    <TouchableOpacity
-                      style={{
-                        flex: 1,
-                        paddingVertical: 12,
-                        borderRadius: 8,
-                        borderWidth: 1,
-                        borderColor: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#ccc',
-                        backgroundColor: courtFeeSplitMethod === 'equal' ? '#e8f0fe' : '#fff',
-                        alignItems: 'center'
-                      }}
-                      onPress={() => setCourtFeeSplitMethod('equal')}
-                    >
-                      <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
-                        Chia đều
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={{
-                        flex: 1,
-                        paddingVertical: 12,
-                        borderRadius: 8,
-                        borderWidth: 1,
-                        borderColor: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#ccc',
-                        backgroundColor: courtFeeSplitMethod === 'proportional' ? '#e8f0fe' : '#fff',
-                        alignItems: 'center'
-                      }}
-                      onPress={() => setCourtFeeSplitMethod('proportional')}
-                    >
-                      <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
-                        Chia theo set đấu
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                  <TouchableOpacity 
-                    style={[styles.actionBtn, { backgroundColor: '#666' }]} 
-                    onPress={() => setFinishModalVisible(false)}
-                  >
-                    <Text style={styles.btnText}>Hủy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[styles.actionBtn, { backgroundColor: '#34a853' }]} 
-                    onPress={async () => {
-                      const fee = parseInt(courtFeeInput) || 0;
-                      if (fee <= 0) {
-                        showAlert("Lỗi", "Vui lòng nhập tiền sân hợp lệ!");
-                        return;
-                      }
-                      await finishSession(pin, fee, courtFeeSplitMethod);
-                      setFinishModalVisible(false);
-                      showAlert("Thành công", "Đã kết thúc buổi chơi và chia tiền sân!");
-                    }}
-                  >
-                    <Text style={styles.btnText}>Xác nhận</Text>
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
-
         {/* Modal Chọn trận đấu / kèo */}
         <Modal
           visible={matchSelectionModalVisible}
@@ -1705,64 +1662,6 @@ export default function SessionScreen() {
           </View>
         </Modal>
 
-        {/* Modal Thêm kèo phụ mới */}
-        <Modal
-          visible={addSideMatchModalVisible}
-          transparent={true}
-          animationType="slide"
-          onRequestClose={() => setAddSideMatchModalVisible(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalOverlay}
-          >
-            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                <View>
-                  <Text style={styles.modalTitle}>Thêm kèo phụ mới</Text>
-                  <Text style={styles.modalSubTitle}>Tạo một kèo phụ tự lập mới chia sẻ thành viên và lịch sử</Text>
-
-                  <View style={{ marginBottom: 15 }}>
-                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Tên kèo phụ:</Text>
-                    <TextInput
-                      style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, paddingVertical: 8 }]}
-                      placeholder="VD: Kèo phụ Sân 2, Kèo bia..."
-                      value={newSideMatchName}
-                      onChangeText={setNewSideMatchName}
-                    />
-                  </View>
-
-                  <View style={{ marginBottom: 20 }}>
-                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Mức cược chung của set (đ):</Text>
-                    <TextInput
-                      style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, paddingVertical: 8 }]}
-                      keyboardType="numeric"
-                      placeholder="VD: 5.000"
-                      value={formatMoney(newSideMatchBetAmount)}
-                      onChangeText={(val) => setNewSideMatchBetAmount(parseMoney(val).toString())}
-                    />
-                  </View>
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                  <TouchableOpacity 
-                    style={[styles.actionBtn, { backgroundColor: '#666' }]} 
-                    onPress={() => setAddSideMatchModalVisible(false)}
-                  >
-                    <Text style={styles.btnText}>Hủy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[styles.actionBtn, { backgroundColor: '#1a73e8' }]} 
-                    onPress={handleCreateSideMatch}
-                  >
-                    <Text style={styles.btnText}>Tạo kèo</Text>
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
-
         {/* Modal chi tiết set hoặc kèo phụ */}
         <Modal
           visible={!!historyModalData}
@@ -1883,119 +1782,6 @@ export default function SessionScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-          )}
-        </Modal>
-
-        {/* Modal nhập cược cá nhân */}
-        <Modal
-          visible={!!customBetModalData}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setCustomBetModalData(null)}
-        >
-          {customBetModalData && (
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              style={styles.modalOverlay}
-            >
-              <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-                <Text style={styles.modalTitle}>Cược riêng: {customBetModalData.playerName}</Text>
-                <Text style={styles.modalSubTitle}>Đặt mức cược riêng cho thành viên này trong set hiện tại (bỏ trống để dùng mức cược chung của set).</Text>
-                
-                <TextInput
-                  style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, marginBottom: 15, paddingVertical: 10 }]}
-                  keyboardType="numeric"
-                  placeholder="Mức cược riêng (đ)..."
-                  value={formatMoney(customBetModalData.customAmount)}
-                  onChangeText={(val) => setCustomBetModalData(prev => (prev ? { ...prev, customAmount: parseMoney(val).toString() } : null))}
-                />
-
-                <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
-                  Đối thủ cược 1-on-1 (Không bắt buộc):
-                </Text>
-
-                <ScrollView
-                  style={{ maxHeight: 180 }}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                >
-                  {(() => {
-                    const teamSize = getPlayerTeamSize(customBetModalData.playerId);
-                    if (teamSize <= 1) {
-                      return (
-                        <Text style={{ fontSize: 12, color: '#666', fontStyle: 'italic', marginBottom: 15 }}>
-                          Đội chỉ có 1 người: mức cược sẽ áp dụng cho cả đội đối thủ (Pool).
-                        </Text>
-                      );
-                    }
-
-                    const opponents = getOpponentsForPlayer(customBetModalData.playerId);
-                    if (opponents.length === 0) {
-                      return (
-                        <Text style={{ fontSize: 12, color: '#999', marginBottom: 15, fontStyle: 'italic' }}>
-                          Không có đối thủ khả dụng (người chơi phải thuộc đội đang đấu).
-                        </Text>
-                      );
-                    }
-                    
-                    return (
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 15 }}>
-                        <TouchableOpacity
-                          style={{
-                            paddingVertical: 6,
-                            paddingHorizontal: 12,
-                            borderRadius: 8,
-                            borderWidth: 1,
-                            borderColor: !customBetModalData.targetPlayerId ? '#34a853' : '#ccc',
-                            backgroundColor: !customBetModalData.targetPlayerId ? '#e6f4ea' : '#fff'
-                          }}
-                          onPress={() => setCustomBetModalData(prev => (prev ? { ...prev, targetPlayerId: '' } : null))}
-                        >
-                          <Text style={{ fontSize: 12, color: !customBetModalData.targetPlayerId ? '#34a853' : '#666', fontWeight: !customBetModalData.targetPlayerId ? 'bold' : 'normal' }}>
-                            Cả đội đối thủ (Pool)
-                          </Text>
-                        </TouchableOpacity>
-                        {opponents.map(opid => {
-                          const isSelected = customBetModalData.targetPlayerId === opid;
-                          return (
-                            <TouchableOpacity
-                              key={opid}
-                              style={{
-                                paddingVertical: 6,
-                                paddingHorizontal: 12,
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: isSelected ? '#1a73e8' : '#ccc',
-                                backgroundColor: isSelected ? '#e8f0fe' : '#fff'
-                              }}
-                              onPress={() => setCustomBetModalData(prev => (prev ? { ...prev, targetPlayerId: opid } : null))}
-                            >
-                              <Text style={{ fontSize: 12, color: isSelected ? '#1a73e8' : '#666', fontWeight: isSelected ? 'bold' : 'normal' }}>
-                                ➔ {players[opid]?.name || opid}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    );
-                  })()}
-                </ScrollView>
-
-                <View style={{ marginTop: 10 }}>
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#ea4335' }]} onPress={handleClearPlayerBet}>
-                      <Text style={styles.btnText}>Xóa cược riêng</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#34a853' }]} onPress={handleSavePlayerBet}>
-                      <Text style={styles.btnText}>Lưu</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <TouchableOpacity style={[styles.modalCloseBtn, { backgroundColor: '#666', marginTop: 10 }]} onPress={() => setCustomBetModalData(null)}>
-                    <Text style={styles.modalCloseText}>Đóng</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </KeyboardAvoidingView>
           )}
         </Modal>
 
@@ -2191,6 +1977,254 @@ export default function SessionScreen() {
             </>
           )}
         </View>
+      )}
+      </KeyboardSafeView>
+
+      {/* Modal Kết thúc buổi chơi */}
+      {finishModalVisible && (
+        <KeyboardSafeModal
+          visible={finishModalVisible}
+          onRequestClose={() => setFinishModalVisible(false)}
+          overlayStyle={styles.modalOverlay}
+        >
+          <View style={[styles.modalContent, { maxHeight: '100%' }]}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View>
+                <Text style={styles.modalTitle}>Kết thúc buổi chơi</Text>
+                <Text style={styles.modalSubTitle}>Nhập tổng tiền sân để tính toán chia phí cho các thành viên.</Text>
+
+                <TextInput
+                  style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, marginBottom: 15, paddingVertical: 10 }]}
+                  keyboardType="numeric"
+                  placeholder="Tổng tiền sân (đ)..."
+                  value={formatMoney(courtFeeInput)}
+                  onChangeText={(val) => setCourtFeeInput(parseMoney(val).toString())}
+                  autoFocus
+                />
+
+                <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
+                  Phương thức chia tiền sân:
+                </Text>
+
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      paddingVertical: 12,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#ccc',
+                      backgroundColor: courtFeeSplitMethod === 'equal' ? '#e8f0fe' : '#fff',
+                      alignItems: 'center'
+                    }}
+                    onPress={() => setCourtFeeSplitMethod('equal')}
+                  >
+                    <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'equal' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
+                      Chia đều
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      paddingVertical: 12,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#ccc',
+                      backgroundColor: courtFeeSplitMethod === 'proportional' ? '#e8f0fe' : '#fff',
+                      alignItems: 'center'
+                    }}
+                    onPress={() => setCourtFeeSplitMethod('proportional')}
+                  >
+                    <Text style={{ fontSize: 12, color: courtFeeSplitMethod === 'proportional' ? '#1a73e8' : '#666', fontWeight: 'bold' }}>
+                      Chia theo set đấu
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#666' }]}
+                  onPress={() => setFinishModalVisible(false)}
+                >
+                  <Text style={styles.btnText}>Hủy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#34a853' }]}
+                  onPress={async () => {
+                    const fee = parseInt(courtFeeInput) || 0;
+                    if (fee <= 0) {
+                      showAlert("Lỗi", "Vui lòng nhập tiền sân hợp lệ!");
+                      return;
+                    }
+                    await finishSession(pin, fee, courtFeeSplitMethod);
+                    setFinishModalVisible(false);
+                    showAlert("Thành công", "Đã kết thúc buổi chơi và chia tiền sân!");
+                  }}
+                >
+                  <Text style={styles.btnText}>Xác nhận</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardSafeModal>
+      )}
+
+      {/* Modal Thêm kèo phụ mới */}
+      {addSideMatchModalVisible && (
+        <KeyboardSafeModal
+          visible={addSideMatchModalVisible}
+          onRequestClose={() => setAddSideMatchModalVisible(false)}
+          overlayStyle={styles.modalOverlay}
+        >
+          <View style={[styles.modalContent, { maxHeight: '100%' }]}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View>
+                <Text style={styles.modalTitle}>Thêm kèo phụ mới</Text>
+                <Text style={styles.modalSubTitle}>Tạo một kèo phụ tự lập mới chia sẻ thành viên và lịch sử</Text>
+
+                <View style={{ marginBottom: 15 }}>
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Tên kèo phụ:</Text>
+                  <TextInput
+                    style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, paddingVertical: 8 }]}
+                    placeholder="VD: Kèo phụ Sân 2, Kèo bia..."
+                    value={newSideMatchName}
+                    onChangeText={setNewSideMatchName}
+                  />
+                </View>
+
+                <View style={{ marginBottom: 20 }}>
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>Mức cược chung của set (đ):</Text>
+                  <TextInput
+                    style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, paddingVertical: 8 }]}
+                    keyboardType="numeric"
+                    placeholder="VD: 5.000"
+                    value={formatMoney(newSideMatchBetAmount)}
+                    onChangeText={(val) => setNewSideMatchBetAmount(parseMoney(val).toString())}
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#666' }]}
+                  onPress={() => setAddSideMatchModalVisible(false)}
+                >
+                  <Text style={styles.btnText}>Hủy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#1a73e8' }]}
+                  onPress={handleCreateSideMatch}
+                >
+                  <Text style={styles.btnText}>Tạo kèo</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardSafeModal>
+      )}
+
+      {/* Modal nhập cược cá nhân */}
+      {customBetModalData && (
+        <KeyboardSafeModal
+          visible={!!customBetModalData}
+          onRequestClose={() => setCustomBetModalData(null)}
+          overlayStyle={styles.modalOverlay}
+        >
+          <View style={[styles.modalContent, { maxHeight: '100%' }]}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalTitle}>Cược riêng: {customBetModalData.playerName}</Text>
+              <Text style={styles.modalSubTitle}>Đặt mức cược riêng cho thành viên này trong set hiện tại (bỏ trống để dùng mức cược chung của set).</Text>
+
+              <TextInput
+                style={[styles.addPlayerInput, { flex: 0, width: '100%', marginRight: 0, marginBottom: 15, paddingVertical: 10 }]}
+                keyboardType="numeric"
+                placeholder="Mức cược riêng (đ)..."
+                value={formatMoney(customBetModalData.customAmount)}
+                onChangeText={(val) => setCustomBetModalData(prev => (prev ? { ...prev, customAmount: parseMoney(val).toString() } : null))}
+              />
+
+              <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8, color: '#333' }}>
+                Đối thủ cược 1-on-1 (Không bắt buộc):
+              </Text>
+
+              {(() => {
+                const teamSize = getPlayerTeamSize(customBetModalData.playerId);
+                if (teamSize <= 1) {
+                  return (
+                    <Text style={{ fontSize: 12, color: '#666', fontStyle: 'italic', marginBottom: 15 }}>
+                      Đội chỉ có 1 người: mức cược sẽ áp dụng cho cả đội đối thủ (Pool).
+                    </Text>
+                  );
+                }
+
+                const opponents = getOpponentsForPlayer(customBetModalData.playerId);
+                if (opponents.length === 0) {
+                  return (
+                    <Text style={{ fontSize: 12, color: '#999', marginBottom: 15, fontStyle: 'italic' }}>
+                      Không có đối thủ khả dụng (người chơi phải thuộc đội đang đấu).
+                    </Text>
+                  );
+                }
+
+                return (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 15 }}>
+                    <TouchableOpacity
+                      style={{
+                        paddingVertical: 6,
+                        paddingHorizontal: 12,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: !customBetModalData.targetPlayerId ? '#34a853' : '#ccc',
+                        backgroundColor: !customBetModalData.targetPlayerId ? '#e6f4ea' : '#fff'
+                      }}
+                      onPress={() => setCustomBetModalData(prev => (prev ? { ...prev, targetPlayerId: '' } : null))}
+                    >
+                      <Text style={{ fontSize: 12, color: !customBetModalData.targetPlayerId ? '#34a853' : '#666', fontWeight: !customBetModalData.targetPlayerId ? 'bold' : 'normal' }}>
+                        Cả đội đối thủ (Pool)
+                      </Text>
+                    </TouchableOpacity>
+                    {opponents.map(opid => {
+                      const isSelected = customBetModalData.targetPlayerId === opid;
+                      return (
+                        <TouchableOpacity
+                          key={opid}
+                          style={{
+                            paddingVertical: 6,
+                            paddingHorizontal: 12,
+                            borderRadius: 8,
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#1a73e8' : '#ccc',
+                            backgroundColor: isSelected ? '#e8f0fe' : '#fff'
+                          }}
+                          onPress={() => setCustomBetModalData(prev => (prev ? { ...prev, targetPlayerId: opid } : null))}
+                        >
+                          <Text style={{ fontSize: 12, color: isSelected ? '#1a73e8' : '#666', fontWeight: isSelected ? 'bold' : 'normal' }}>
+                            ➔ {players[opid]?.name || opid}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
+
+              <View style={{ marginTop: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#ea4335' }]} onPress={handleClearPlayerBet}>
+                    <Text style={styles.btnText}>Xóa cược riêng</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#34a853' }]} onPress={handleSavePlayerBet}>
+                    <Text style={styles.btnText}>Lưu</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={[styles.modalCloseBtn, { backgroundColor: '#666', marginTop: 10 }]} onPress={() => setCustomBetModalData(null)}>
+                  <Text style={styles.modalCloseText}>Đóng</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardSafeModal>
       )}
     </View>
   );
@@ -2577,10 +2611,6 @@ const styles = StyleSheet.create({
 
   /* Footer & Action Buttons */
   footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 14,
