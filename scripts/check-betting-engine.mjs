@@ -59,6 +59,31 @@ const cases = [
   ['ENG-22 Payout dự kiến 4v5 chưa gánh: B thắng nhận 4k',
     run(team('a1', 'a2', 'a3', 'a4'), team(...ids('b', 5)), 'teamB', 5000, {}),
     { a1: -5000, a2: -5000, a3: -5000, a4: -5000, b1: 4000, b2: 4000, b3: 4000, b4: 4000, b5: 4000 }],
+  ['ENG-24 Kèo kèm nhiều đối thủ cộng thêm trên kèo chung: A1 kèm B1 10k + B2 15k, A thắng',
+    run(team('a1', 'a2'), team('b1', 'b2'), 'teamA', 5000, { a1: { sideOpponents: { b1: 10000, b2: 15000 } } }),
+    { a1: 30000, a2: 5000, b1: -15000, b2: -20000 }],
+  ['ENG-25 Kèo kèm nhiều đối thủ cộng thêm trên kèo chung: B thắng',
+    run(team('a1', 'a2'), team('b1', 'b2'), 'teamB', 5000, { a1: { sideOpponents: { b1: 10000, b2: 15000 } } }),
+    { a1: -30000, a2: -5000, b1: 15000, b2: 20000 }],
+  ['ENG-26 Kết hợp poolAmount (gánh 10k) + kèm nhiều đối thủ (B1 10k, B2 5k), A thắng',
+    run(team('a1', 'a2'), team('b1', 'b2', 'b3'), 'teamA', 5000, { a1: { poolAmount: 10000, sideOpponents: { b1: 10000, b2: 5000 } } }),
+    { a1: 25000, a2: 5000, b1: -15000, b2: -10000, b3: -5000 }],
+  ['ENG-27 Chống tính trùng 2 chiều khi cả A1 và B1 cùng khai báo kèo kèm nhau',
+    run(team('a1', 'a2'), team('b1', 'b2'), 'teamA', 5000, {
+      a1: { sideOpponents: { b1: 10000 } },
+      b1: { sideOpponents: { a1: 10000 } },
+    }),
+    { a1: 15000, a2: 5000, b1: -15000, b2: -5000 }],
+  ['ENG-28 Bỏ qua đối thủ đang nghỉ hoặc cùng đội trong sideOpponents',
+    calculateSettlement(
+      { teamA: team('a1', 'a2'), teamB: team('b1', 'b2'), teamC: team('c1') },
+      'teamA_teamB',
+      'teamA',
+      5000,
+      { a1: { sideOpponents: { b1: 10000, a2: 20000, c1: 30000 } } },
+      () => 0
+    ),
+    { a1: 15000, a2: 5000, b1: -15000, b2: -5000 }],
 ];
 
 for (const [name, result, expected] of cases) {

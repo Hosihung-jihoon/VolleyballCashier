@@ -37,11 +37,32 @@ const react = {
     if (!(index in slots)) slots[index] = { current: initial };
     return slots[index];
   },
+  useMemo(factory, deps) {
+    const index = cursor++;
+    const previous = slots[index];
+    if (!previous || !sameDeps(previous.deps, deps)) {
+      slots[index] = { deps, value: factory() };
+    }
+    return slots[index].value;
+  },
 };
 const jsx = (type, props) => ({ type, props });
+const chainableGesture = () => {
+  const g = {};
+  ['activateAfterLongPress', 'runOnJS', 'onStart', 'onUpdate', 'onFinalize'].forEach(method => {
+    g[method] = () => g;
+  });
+  return g;
+};
 const native = {
   Platform: { OS: 'web' },
   StyleSheet: { create: styles => styles },
+  Animated: {
+    ValueXY: class { constructor(v) { this.x = v?.x || 0; this.y = v?.y || 0; } setValue() {} },
+    View: 'AnimatedView',
+    subtract: (a, b) => (Number(a) || 0) - (Number(b) || 0),
+  },
+  Vibration: { vibrate: () => {} },
   Keyboard: {
     isVisible: () => false,
     metrics: () => null,
@@ -64,8 +85,10 @@ const compile = relPath => transformSync(fs.readFileSync(new URL(relPath, import
 }).code;
 const { code } = { code: compile('../src/app/session.js') };
 const keyboardSafeModule = { exports: {} };
+const draggableModule = { exports: {} };
 const module = { exports: {} };
 let keyboardSafeLoaded = false;
+let draggableLoaded = false;
 const context = vm.createContext({
   module,
   exports: module.exports,
@@ -73,6 +96,9 @@ const context = vm.createContext({
     if (name === 'react') return react;
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
     if (name === 'react-native') return native;
+    if (name === 'react-native-gesture-handler') {
+      return { Gesture: { Pan: chainableGesture }, GestureDetector: 'GestureDetector', GestureHandlerRootView: 'GestureHandlerRootView' };
+    }
     if (name === 'react-native-safe-area-context') return { useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) };
     if (name === '../components/keyboard-safe-view') {
       if (!keyboardSafeLoaded) {
@@ -84,6 +110,17 @@ const context = vm.createContext({
         }));
       }
       return keyboardSafeModule.exports;
+    }
+    if (name === '../components/draggable-player') {
+      if (!draggableLoaded) {
+        draggableLoaded = true;
+        vm.runInContext(compile('../src/components/draggable-player.js'), vm.createContext({
+          module: draggableModule,
+          exports: draggableModule.exports,
+          require: context.require,
+        }));
+      }
+      return draggableModule.exports;
     }
     if (name === 'expo-router') return { router: {}, useLocalSearchParams: () => ({ pin: 'L-CHECK', role: 'host' }) };
     if (name === '@react-native-async-storage/async-storage') return { setItem: async () => {} };

@@ -43,7 +43,23 @@ export const calculateSettlement = (firstArg, ...args) => {
   let totalCollected = 0;
   const balanceChanges = {};
 
+  const isMultiSideBet = (val) =>
+    Boolean(val && typeof val === 'object' && ('poolAmount' in val || 'sideOpponents' in val));
+
+  const getPoolBetAmount = (rawBet, defaultBet) => {
+    if (rawBet === null || rawBet === undefined || rawBet === '') return defaultBet;
+    if (typeof rawBet === 'number') return rawBet;
+    if (typeof rawBet === 'string') return Number(rawBet) || 0;
+    if (isMultiSideBet(rawBet)) {
+      return rawBet.poolAmount !== undefined && rawBet.poolAmount !== null && rawBet.poolAmount !== ''
+        ? (Number(rawBet.poolAmount) || 0)
+        : defaultBet;
+    }
+    return Number(rawBet.amount) || 0;
+  };
+
   const getBetInfo = (val) => {
+    if (isMultiSideBet(val)) return null;
     if (val && typeof val === 'object') {
       return {
         amount: Number(val.amount) || 0,
@@ -120,9 +136,7 @@ export const calculateSettlement = (firstArg, ...args) => {
     if (activeSlotPids.length === 0) return;
 
     activeSlotPids.forEach(pid => {
-      const rawBet = playerBets && playerBets[pid];
-      const betInfo = getBetInfo(rawBet);
-      const pBet = betInfo ? betInfo.amount : betAmount;
+      const pBet = getPoolBetAmount(playerBets && playerBets[pid], betAmount);
       const rawLoss = pBet / activeSlotPids.length;
       const roundedLoss = Math.ceil(rawLoss / 1000) * 1000;
       balanceChanges[pid] = (balanceChanges[pid] || 0) - roundedLoss;
@@ -137,9 +151,7 @@ export const calculateSettlement = (firstArg, ...args) => {
     if (activeSlotPids.length === 0) return;
 
     activeSlotPids.forEach(pid => {
-      const rawBet = playerBets && playerBets[pid];
-      const betInfo = getBetInfo(rawBet);
-      const pBet = betInfo ? betInfo.amount : betAmount;
+      const pBet = getPoolBetAmount(playerBets && playerBets[pid], betAmount);
       const rawWin = pBet / activeSlotPids.length;
       totalExpected += rawWin;
     });
@@ -151,9 +163,7 @@ export const calculateSettlement = (firstArg, ...args) => {
     if (activeSlotPids.length === 0) return;
 
     activeSlotPids.forEach(pid => {
-      const rawBet = playerBets && playerBets[pid];
-      const betInfo = getBetInfo(rawBet);
-      const pBet = betInfo ? betInfo.amount : betAmount;
+      const pBet = getPoolBetAmount(playerBets && playerBets[pid], betAmount);
       const rawWin = pBet / activeSlotPids.length;
       const winRaw = totalExpected > 0 ? rawWin * (totalCollected / totalExpected) : 0;
       const roundedWin = Math.round(winRaw / 1000) * 1000;
@@ -189,6 +199,39 @@ export const calculateSettlement = (firstArg, ...args) => {
       : poolKeys[Math.floor(randomFn() * poolKeys.length)];
     balanceChanges[bestKey] = balanceChanges[bestKey] - sumChanges;
   }
+
+  // 5. Kèo kèm riêng nhiều đối thủ (cộng thêm trên kèo chung)
+  const winningPidSet = new Set(winningSlots.flat());
+  const losingPidSet = new Set(losingSlots.flat());
+  const settledSidePairs = new Set();
+
+  allPlayingPids.forEach(pid => {
+    const rawBet = playerBets && playerBets[pid];
+    if (!isMultiSideBet(rawBet) || !rawBet.sideOpponents || typeof rawBet.sideOpponents !== 'object') {
+      return;
+    }
+
+    Object.entries(rawBet.sideOpponents).forEach(([oppId, rawAmt]) => {
+      const amt = Number(rawAmt) || 0;
+      if (amt <= 0) return;
+      const pidWon = winningPidSet.has(pid);
+      const oppWon = winningPidSet.has(oppId);
+      const oppPlaying = oppWon || losingPidSet.has(oppId);
+      if (!oppPlaying || pidWon === oppWon) return;
+
+      const pairKey = [pid, oppId].sort().join('_');
+      if (settledSidePairs.has(pairKey)) return;
+      settledSidePairs.add(pairKey);
+
+      if (pidWon) {
+        balanceChanges[pid] = (balanceChanges[pid] || 0) + amt;
+        balanceChanges[oppId] = (balanceChanges[oppId] || 0) - amt;
+      } else {
+        balanceChanges[pid] = (balanceChanges[pid] || 0) - amt;
+        balanceChanges[oppId] = (balanceChanges[oppId] || 0) + amt;
+      }
+    });
+  });
 
   return { balanceChanges, fundAddition: 0, totalCollected };
 };

@@ -163,6 +163,7 @@ export const startNewSet = async (pin, betAmount, previousTeams = null) => {
     status: 'playing',
     winner: null,
     betAmount: betAmount,
+    note: '',
     matchup: previousTeams?.matchup || 'teamA_teamB',
     playerBets: previousTeams?.playerBets || {},
     teams: teamsData,
@@ -196,6 +197,14 @@ export const updateSetBetAmount = async (pin, setId, betAmount) => {
   await saveSessionData(pin, session);
 };
 
+// Cập nhật ghi chú của set (đang đấu hoặc trong lịch sử)
+export const updateSetNote = async (pin, setId, note) => {
+  const session = await getSessionData(pin);
+  if (!session || !session.sets || !session.sets[setId]) return;
+  session.sets[setId].note = typeof note === 'string' ? note : '';
+  await saveSessionData(pin, session);
+};
+
 // Cập nhật matchup (Đội đấu)
 export const updateMatchup = async (pin, setId, matchup) => {
   const session = await getSessionData(pin);
@@ -204,16 +213,34 @@ export const updateMatchup = async (pin, setId, matchup) => {
   await saveSessionData(pin, session);
 };
 
+const applyPlayerBetUpdate = (playerBets, playerId, betValue) => {
+  Object.entries(playerBets).forEach(([otherPid, otherBet]) => {
+    if (otherPid === playerId) return;
+    if (otherBet && typeof otherBet === 'object' && otherBet.sideOpponents && playerId in otherBet.sideOpponents) {
+      delete otherBet.sideOpponents[playerId];
+      if (Object.keys(otherBet.sideOpponents).length === 0) {
+        if (otherBet.poolAmount !== undefined && otherBet.poolAmount !== null) {
+          playerBets[otherPid] = otherBet.poolAmount;
+        } else {
+          delete playerBets[otherPid];
+        }
+      }
+    }
+  });
+
+  if (betValue === null || betValue === undefined) {
+    delete playerBets[playerId];
+  } else {
+    playerBets[playerId] = betValue;
+  }
+};
+
 // Cập nhật tiền cược của cá nhân trong set
 export const updatePlayerBet = async (pin, setId, playerId, amount) => {
   const session = await getSessionData(pin);
   if (!session || !session.sets || !session.sets[setId]) return;
   if (!session.sets[setId].playerBets) session.sets[setId].playerBets = {};
-  if (amount === null || amount === undefined) {
-    delete session.sets[setId].playerBets[playerId];
-  } else {
-    session.sets[setId].playerBets[playerId] = amount;
-  }
+  applyPlayerBetUpdate(session.sets[setId].playerBets, playerId, amount);
   await saveSessionData(pin, session);
 };
 
@@ -439,7 +466,7 @@ export const togglePlayerSettled = async (pin, playerId, isSettled) => {
 };
 
 // Kết thúc buổi chơi và chia tiền sân
-export const finishSession = async (pin, totalCourtFee, splitMethod) => {
+export const finishSession = async (pin, totalCourtFee, splitMethod, customPerPlayerFee = 0) => {
   const session = await getSessionData(pin);
   if (!session || !session.players) return;
 
@@ -449,7 +476,13 @@ export const finishSession = async (pin, totalCourtFee, splitMethod) => {
 
   const shares = {};
 
-  if (splitMethod === 'proportional') {
+  if (splitMethod === 'custom') {
+    const perPlayer = Math.max(0, Number(customPerPlayerFee) || 0);
+    if (perPlayer <= 0) return;
+    playerIds.forEach(pid => {
+      shares[pid] = perPlayer;
+    });
+  } else if (splitMethod === 'proportional') {
     // Đếm số set đã chơi của mỗi người chơi
     const sets = session.sets || {};
     const setsPlayed = {};
@@ -524,7 +557,9 @@ export const finishSession = async (pin, totalCourtFee, splitMethod) => {
 
   // ponytail: surplus stays as extra buffer rather than artificially discounting the first player
   const totalCollected = Object.values(shares).reduce((sum, val) => sum + val, 0);
-  const surplus = Math.max(0, totalCollected - totalCourtFee);
+  const effectiveTotal = totalCourtFee > 0 ? totalCourtFee : totalCollected;
+  const surplus = Math.max(0, totalCollected - effectiveTotal);
+  const deficit = Math.max(0, effectiveTotal - totalCollected);
 
   // Trừ tiền sân vào balance
   playerIds.forEach(pid => {
@@ -534,11 +569,13 @@ export const finishSession = async (pin, totalCourtFee, splitMethod) => {
   if (!session.meta) session.meta = {};
   session.meta.status = 'finished';
   session.courtFee = {
-    total: totalCourtFee,
-    totalCollected: totalCollected,
-    surplus: surplus,
-    splitMethod: splitMethod,
-    shares: shares,
+    total: effectiveTotal,
+    totalCollected,
+    surplus,
+    deficit,
+    splitMethod,
+    ...(splitMethod === 'custom' ? { perPlayerFee: Math.max(0, Number(customPerPlayerFee) || 0) } : {}),
+    shares,
   };
 
   await saveSessionData(pin, session);
@@ -642,6 +679,7 @@ export const startNewSideSet = async (pin, betAmount, sideMatchId, previousTeams
     status: 'playing',
     winner: null,
     betAmount: betAmount,
+    note: '',
     matchup: 'teamA_teamB',
     playerBets: {},
     teams: teamsData,
@@ -664,6 +702,14 @@ export const updateSideSetBetAmount = async (pin, setId, betAmount) => {
   const session = await getSessionData(pin);
   if (!session || !session.sideSets || !session.sideSets[setId]) return;
   session.sideSets[setId].betAmount = betAmount;
+  await saveSessionData(pin, session);
+};
+
+// Cập nhật ghi chú set kèo phụ
+export const updateSideSetNote = async (pin, setId, note) => {
+  const session = await getSessionData(pin);
+  if (!session || !session.sideSets || !session.sideSets[setId]) return;
+  session.sideSets[setId].note = typeof note === 'string' ? note : '';
   await saveSessionData(pin, session);
 };
 
@@ -786,10 +832,6 @@ export const updateSidePlayerBet = async (pin, setId, playerId, amount) => {
   const session = await getSessionData(pin);
   if (!session || !session.sideSets || !session.sideSets[setId]) return;
   if (!session.sideSets[setId].playerBets) session.sideSets[setId].playerBets = {};
-  if (amount === null || amount === undefined) {
-    delete session.sideSets[setId].playerBets[playerId];
-  } else {
-    session.sideSets[setId].playerBets[playerId] = amount;
-  }
+  applyPlayerBetUpdate(session.sideSets[setId].playerBets, playerId, amount);
   await saveSessionData(pin, session);
 };

@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import * as Updates from 'expo-updates';
 import { useEffect } from 'react';
 import { Alert, Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function RootLayout() {
   useEffect(() => {
@@ -33,9 +34,11 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <Stack screenOptions={{ headerShown: false, title: 'Sổ Kèo Bóng Chuyền' }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="session" />
-    </Stack>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false, title: 'Sổ Kèo Bóng Chuyền' }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="session" />
+      </Stack>
+    </GestureHandlerRootView>
   );
 }
